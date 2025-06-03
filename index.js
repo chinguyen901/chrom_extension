@@ -1,18 +1,33 @@
-// index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 
 const app = express();
-const port = process.env.PORT || 8080; // Railway sẽ set PORT=8080, local dùng 3000 nếu muốn
+const port = process.env.PORT || 3000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-app.use(cors());
+// CORS cấu hình để cho phép extension Chrome
+const allowedOrigins = [
+  'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
 app.use(express.json());
 
 app.post('/log', async (req, res) => {
