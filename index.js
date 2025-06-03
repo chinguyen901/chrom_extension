@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// PostgreSQL config
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -13,15 +14,25 @@ const pool = new Pool({
   }
 });
 
-const corsOptions = {
-  origin: 'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk',
+// CORS config (fix CORS cho Chrome Extension)
+const extensionOrigin = 'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk';
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Cho phép nếu không có origin (ex: curl, Postman) hoặc đúng extension ID
+    if (!origin || origin === extensionOrigin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
   optionsSuccessStatus: 200
-};
+}));
 
-app.use(cors(corsOptions));
-app.options('/log', cors(corsOptions));
+// Xử lý tất cả OPTIONS requests (preflight)
+app.options('*', cors());
 
 app.use(express.json());
 
