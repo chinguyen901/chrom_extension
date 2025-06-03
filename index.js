@@ -13,20 +13,15 @@ const pool = new Pool({
   }
 });
 
-// CORS cấu hình để cho phép extension Chrome
-const allowedOrigins = [
-  'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk'
-];
+const corsOptions = {
+  origin: 'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  optionsSuccessStatus: 200
+};
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
-}));
+app.use(cors(corsOptions));
+app.options('/log', cors(corsOptions));
 
 app.use(express.json());
 
