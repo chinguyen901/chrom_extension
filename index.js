@@ -24,7 +24,7 @@ app.post('/log', async (req, res) => {
 
   try {
     await pool.query(
-      'INSERT INTO client_logs (username, action, log_time) VALUES ($1, $2, NOW())',
+      'INSERT INTO logs (username, action, log_time) VALUES ($1, $2, NOW())',
       [user, action]
     );
     res.status(200).json({ message: 'Log saved' });
