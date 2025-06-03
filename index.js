@@ -1,16 +1,15 @@
+// index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080; // Railway sẽ set PORT=8080, local dùng 3000 nếu muốn
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 app.use(cors());
