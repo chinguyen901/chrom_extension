@@ -1,7 +1,11 @@
-const http = require('http');
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
 const { Pool } = require('pg');
 
-// PostgreSQL connection
+const app = express();
+const port = process.env.PORT || 3000;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -9,35 +13,32 @@ const pool = new Pool({
   }
 });
 
-const server = http.createServer(async (req, res) => {
-  if (req.method === 'POST' && req.url === '/log') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', async () => {
-      try {
-        const data = JSON.parse(body);
-        const { userId, action, timestamp } = data;
+app.use(cors());
+app.use(express.json());
 
-        await pool.query(
-          'INSERT INTO logs(user_id, action, timestamp) VALUES($1, $2, $3)',
-          [userId, action, timestamp]
-        );
+app.post('/log', async (req, res) => {
+  const { user, action } = req.body;
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok' }));
-      } catch (err) {
-        console.error(err);
-        res.writeHead(500);
-        res.end('Error');
-      }
-    });
-  } else {
-    res.writeHead(404);
-    res.end('Not Found');
+  if (!user || !['login', 'logout'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid data' });
+  }
+
+  try {
+    await pool.query(
+      'INSERT INTO client_logs (username, action, log_time) VALUES ($1, $2, NOW())',
+      [user, action]
+    );
+    res.status(200).json({ message: 'Log saved' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running at port ${PORT}`);
+app.get('/', (req, res) => {
+  res.send('Client Logger Backend is running.');
+});
+
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
 });
