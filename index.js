@@ -1,64 +1,35 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const { Pool } = require("pg");
+require("dotenv").config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+app.use(cors());
+app.use(bodyParser.json());
 
-// PostgreSQL config
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  connectionString: process.env.POSTGRES_URL,
 });
 
-// CORS config (fix CORS cho Chrome Extension)
-const extensionOrigin = 'chrome-extension://odhkdfokogfliiiolhpkhbglpappmjlk';
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Cho phép nếu không có origin (ex: curl, Postman) hoặc đúng extension ID
-    if (!origin || origin === extensionOrigin) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  optionsSuccessStatus: 200
-}));
-
-// Xử lý tất cả OPTIONS requests (preflight)
-app.options('*', cors());
-
-app.use(express.json());
-
-app.post('/log', async (req, res) => {
-  const { user, action } = req.body;
-
-  if (!user || !['login', 'logout'].includes(action)) {
-    return res.status(400).json({ error: 'Invalid data' });
-  }
-
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
   try {
-    await pool.query(
-      'INSERT INTO Log (username, action, log_time) VALUES ($1, $2, NOW())',
-      [user, action]
-    );
-    res.status(200).json({ message: 'Log saved' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Database error' });
+    const query = "SELECT * FROM accounts WHERE username=$1 AND password=$2";
+    const values = [email, password];
+    const result = await pool.query(query, values);
+
+    if (result.rows.length > 0) {
+      const user = result.rows[0];
+      res.json({ username: user.username, full_name: user.full_name });
+    } else {
+      res.status(401).json({ message: "Invalid credentials" });
+    }
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Client Logger Backend is running.');
-});
-
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
