@@ -15,30 +15,38 @@ const server = http.createServer(async (req, res) => {
   req.on('end', async () => {
     try {
       const { email, password } = JSON.parse(body);
+
+      // Truy vấn user
       const result = await pool.query(
         'SELECT * FROM account WHERE email = $1 AND password = $2',
         [email, password]
       );
 
       if (result.rows.length > 0) {
-        const user = result.rows[0];
+        // Login thành công
         res.writeHead(200, {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
         });
-        res.end(JSON.stringify({ success: true, userId: user.id, username: user.username }));
+        res.end(JSON.stringify({ 
+          username: result.rows[0].username,
+          userId: result.rows[0].id
+        }));
       } else {
-        res.writeHead(401, { 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: false, message: 'Invalid credentials' }));
+        // Login thất bại
+        res.writeHead(401, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ error: 'Invalid credentials' }));
       }
     } catch (err) {
-      console.error("❌ LOGIN ERROR:", err);
+      console.error(err);
       res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
-      res.end('Login failed');
+      res.end('Server error');
     }
   });
 }
-
 
   // Send log action//
   if (req.method === 'POST' && req.url === '/log') {
