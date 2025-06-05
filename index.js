@@ -1,35 +1,43 @@
-const express = require("express");
-const cors = require("cors");
-const bodyParser = require("body-parser");
-const { Pool } = require("pg");
-require("dotenv").config();
+const http = require('http');
+const { Pool } = require('pg');
 
-const app = express();
-app.use(cors());
-app.use(bodyParser.json());
-
+// PostgreSQL connection
 const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const query = "SELECT * FROM accounts WHERE username=$1 AND password=$2";
-    const values = [email, password];
-    const result = await pool.query(query, values);
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'POST' && req.url === '/log') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { userId, action, timestamp } = data;
 
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
-      res.json({ username: user.username, full_name: user.full_name });
-    } else {
-      res.status(401).json({ message: "Invalid credentials" });
-    }
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ message: "Server error" });
+        await pool.query(
+          'INSERT INTO logs(user_id, action, timestamp) VALUES($1, $2, $3)',
+          [userId, action, timestamp]
+        );
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (err) {
+        console.error(err);
+        res.writeHead(500);
+        res.end('Error');
+      }
+    });
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Server running at port ${PORT}`);
+});
