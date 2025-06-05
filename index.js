@@ -48,6 +48,7 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const data = JSON.parse(body);
+        console.log("📦 Log body:", data);
         const { userId, action, timestamp } = data;
         await pool.query(
           'INSERT INTO logs(userId, action, timestamp) VALUES ($1, $2, $3)',
