@@ -16,7 +16,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const { email, password } = JSON.parse(body);
       const result = await pool.query(
-        'SELECT * FROM account WHERE email = $2 AND password = $3',
+        'SELECT * FROM account WHERE email = $1 AND password = $2',
         [email, password]
       );
 
