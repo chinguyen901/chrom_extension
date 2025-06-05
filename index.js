@@ -8,6 +8,39 @@ const pool = new Pool({
 });
 
 const server = http.createServer(async (req, res) => {
+  // Login Email + Password
+  if (req.method === 'POST' && req.url === '/login') {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const { email, password } = JSON.parse(body);
+      const result = await pool.query(
+        'SELECT * FROM accounts WHERE email = $1 AND password = $2',
+        [email, password]
+      );
+
+      if (result.rows.length > 0) {
+        const user = result.rows[0];
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ success: true, userId: user.id, username: user.username }));
+      } else {
+        res.writeHead(401, { 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, message: 'Invalid credentials' }));
+      }
+    } catch (err) {
+      console.error("❌ LOGIN ERROR:", err);
+      res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
+      res.end('Login failed');
+    }
+  });
+}
+
+
+  // Send log action//
   if (req.method === 'POST' && req.url === '/log') {
     let body = '';
     req.on('data', chunk => body += chunk);
