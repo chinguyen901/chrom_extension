@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
         console.log("📦 Log body:", data);
         const { userId, action, timestamp } = data;
         await pool.query(
-          'INSERT INTO logs(userId, action, timestamp) VALUES ($1, $2, $3)',
+          'INSERT INTO logss(userId, action, timestamp) VALUES ($1, $2, $3)',
           [userId, action, timestamp]
         );
         res.writeHead(200, {
