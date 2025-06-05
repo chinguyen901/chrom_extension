@@ -28,6 +28,7 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ status: 'ok' }));
       } catch (err) {
         console.error("❌ INSERT ERROR:", err);
+        console.error("Body received:", body);
         res.writeHead(500, { 'Access-Control-Allow-Origin': '*' });
         res.end('Error while inserting log');
       }
