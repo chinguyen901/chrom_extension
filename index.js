@@ -31,6 +31,15 @@ wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
   ws.isAlive = true;
   ws.lastSeen = new Date();
+  setTimeout(() => {
+    if (ws.readyState === ws.OPEN) {
+      console.log("🧪 DEBUG: sending test force-checkin after 5s");
+      ws.send(JSON.stringify({
+        type: "force-checkin",
+        message: "DEBUG TEST: Bạn đã bị ngắt đột ngột. Vui lòng Check In Again!"
+      }));
+    }
+  }, 5000);
 
   ws.on('message', async (data) => {
     try {
