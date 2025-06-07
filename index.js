@@ -1,4 +1,4 @@
-// ✅ index.js (ĐÃ FIX toàn bộ logic ping-pong đúng chuẩn, ghi ACTIVE khi có pong)
+// ✅ index.js (có logic gửi force-checkin nếu client không phản hồi > 5 phút)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -155,6 +155,13 @@ setInterval(() => {
         [account_id, 'SUDDEN', 'Client disconnected or inactive > 5m', now]
       );
       logDistraction(account_id, 'NO ACTIVE ON TAB', 0);
+
+      try {
+        ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
+      } catch (e) {
+        console.error("❌ Failed to send force-checkin to client:", e.message);
+      }
+
       ws.terminate();
       clients.delete(account_id);
     } else {
