@@ -172,10 +172,19 @@ function logDistraction(account_id, status, note = 0) {
 
 // 🔄 Self-ping Railway để giữ server hoạt động
 setInterval(() => {
-  fetch('https://chromextension-production.up.railway.app/')
-    .then(() => console.log('⏰ Self-ping sent to keep Railway alive.'))
-    .catch(err => console.error('❌ Self-ping failed:', err.message));
-}, 1000 * 60 * 5); // 5 phút
+  const https = require('https');
+  const URL = 'https://chromextension-production.up.railway.app'; // URL thật
+
+  https.get(URL, (res) => {
+    res.on('data', () => {});
+    res.on('end', () => {
+      console.log('🔄 Self-ping success at', new Date().toISOString());
+    });
+  }).on('error', (err) => {
+    console.error('❌ Self-ping error:', err.message);
+  });
+}, 1000);
+
 
 // 🚀 Start server
 createTables().then(() => {
