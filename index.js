@@ -93,7 +93,7 @@ wss.on('connection', (ws) => {
           const { account_id, status, created_at } = msg;
           await pool.query(
             `INSERT INTO login_logout_session (account_id, status, created_at) VALUES ($1, $2, $3)`,
-            [account_id, status || 'logout', created_at || new Date()]
+            [account_id, status, created_at || new Date()]
           );
           ws.send(JSON.stringify({ success: true, type: "log-loginout" }));
           break;
