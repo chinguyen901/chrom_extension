@@ -95,7 +95,7 @@ wss.on('connection', (ws) => {
             `INSERT INTO login_logout_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status, created_at || new Date()]
           );
-          ws.send(JSON.stringify({ success: true, type: "log-loginout" }));
+          ws.send(JSON.stringify({ success: true, type: "log-loginout", status }));
           break;
         }
 
