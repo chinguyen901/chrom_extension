@@ -4,6 +4,9 @@ const { Pool } = require('pg');
 require('dotenv').config();
 const createTables = require('./createTables');
 
+// Tương thích với CommonJS: import fetch
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -119,6 +122,7 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Khởi tạo bảng rồi chạy server
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
@@ -129,10 +133,18 @@ createTables().then(() => {
   process.exit(1);
 });
 
+// Shutdown gọn gàng khi Railway dừng
 process.on('SIGTERM', () => {
-  console.log('Application is shutting down...');
+  console.log('📦 Application is shutting down...');
   pool.end(() => {
     console.log('Database connection closed');
     process.exit(0);
   });
 });
+
+// ⏰ Self-ping giữ Railway không sleep
+setInterval(() => {
+  fetch('https://chromextension-production.up.railway.app/')
+    .then(() => console.log('⏰ Self-ping to keep Railway alive'))
+    .catch(err => console.error('❌ Self-ping failed:', err.message));
+}, 1000 * 60 * 1); 
