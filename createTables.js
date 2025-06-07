@@ -60,6 +60,13 @@ const createTables = async () => {
         reason       TEXT,
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS login_logout_session (
+        log_id      SERIAL PRIMARY KEY,
+        account_id  INT NOT NULL REFERENCES accounts(account_id),
+        status      VARCHAR(20) CHECK (status IN ('login', 'logout')) NOT NULL,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     console.log('✅ Đã tạo bảng (nếu chưa tồn tại).');
