@@ -9,7 +9,6 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Kiểm tra kết nối PostgreSQL
 pool.connect()
   .then(() => console.log("✅ Database connected successfully."))
   .catch(err => {
@@ -17,7 +16,6 @@ pool.connect()
     process.exit(1);
   });
 
-// Khởi tạo server
 const server = http.createServer();
 const wss = new WebSocketServer({ server });
 
@@ -47,60 +45,60 @@ wss.on('connection', (ws) => {
         }
 
         case 'log-work': {
-          const { account_id, status } = msg;
+          const { account_id, status, created_at } = msg;
           await pool.query(
             `INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
-            [account_id, status || 'unknown', new Date()]
+            [account_id, status || 'unknown', created_at || new Date()]
           );
-          ws.send(JSON.stringify({ success: true }));
+          ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
         case 'log-break': {
-          const { account_id, status } = msg;
+          const { account_id, status, created_at } = msg;
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
-            [account_id, status || 'unknown', new Date()]
+            [account_id, status || 'unknown', created_at || new Date()]
           );
-          ws.send(JSON.stringify({ success: true }));
+          ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
         case 'log-incident': {
-          const { account_id, status, reason } = msg;
+          const { account_id, status, reason, created_at } = msg;
           await pool.query(
             `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
-            [account_id, status || 'unknown', reason || '', new Date()]
+            [account_id, status || 'unknown', reason || '', created_at || new Date()]
           );
-          ws.send(JSON.stringify({ success: true }));
+          ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
         case 'log-loginout': {
-          const { account_id, status } = msg;
+          const { account_id, status, created_at } = msg;
           await pool.query(
             `INSERT INTO login_logout_session (account_id, status, created_at) VALUES ($1, $2, $3)`,
-            [account_id, status || 'logout', new Date()]
+            [account_id, status || 'logout', created_at || new Date()]
           );
-          ws.send(JSON.stringify({ success: true }));
+          ws.send(JSON.stringify({ success: true, type: "log-loginout" }));
           break;
         }
 
         case 'log-screenshot': {
-          const { account_id, hash } = msg;
+          const { account_id, hash, created_at } = msg;
           await pool.query(
             `INSERT INTO photo_sessions (account_id, hash, created_at) VALUES ($1, $2, $3)`,
-            [account_id, hash, new Date()]
+            [account_id, hash, created_at || new Date()]
           );
           ws.send(JSON.stringify({ success: true }));
           break;
         }
 
         case 'log-distraction': {
-          const { account_id, status, note } = msg;
+          const { account_id, status, note, created_at } = msg;
           await pool.query(
             `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
-            [account_id, status || 'unknown', note || '', new Date()]
+            [account_id, status || 'unknown', note || '', created_at || new Date()]
           );
           ws.send(JSON.stringify({ success: true }));
           break;
@@ -121,7 +119,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Khởi động server sau khi đã tạo bảng
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
@@ -132,7 +129,6 @@ createTables().then(() => {
   process.exit(1);
 });
 
-// Đóng kết nối khi nhận SIGTERM
 process.on('SIGTERM', () => {
   console.log('Application is shutting down...');
   pool.end(() => {
