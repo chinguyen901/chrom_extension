@@ -4,9 +4,6 @@ const { Pool } = require('pg');
 require('dotenv').config();
 const createTables = require('./createTables');
 
-// Tương thích với CommonJS: import fetch
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -19,11 +16,26 @@ pool.connect()
     process.exit(1);
   });
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("Server is alive");
+});
+
 const wss = new WebSocketServer({ server });
+const clients = new Map();
 
 wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
+  ws.isAlive = true;
+  ws.lastSeen = new Date();
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
+    ws.lastSeen = new Date();
+    if (ws.account_id) {
+      logDistraction(ws.account_id, 'ACTIVE', 0);
+    }
+  });
 
   ws.on('message', async (data) => {
     try {
@@ -31,6 +43,11 @@ wss.on('connection', (ws) => {
       const type = msg.type;
 
       if (!type) return ws.send(JSON.stringify({ success: false, error: "Missing message type" }));
+
+      if (msg.account_id) {
+        clients.set(msg.account_id, ws);
+        ws.account_id = msg.account_id;
+      }
 
       switch (type) {
         case 'login': {
@@ -119,10 +136,40 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log("🚪 Client disconnected.");
+    if (ws.account_id) clients.delete(ws.account_id);
   });
 });
 
-// Khởi tạo bảng rồi chạy server
+// Heartbeat mỗi 10 giây
+setInterval(() => {
+  const now = new Date();
+  for (const [account_id, ws] of clients.entries()) {
+    if (ws.isAlive === false || (now - ws.lastSeen > 5 * 60 * 1000)) {
+      console.warn(`⚠️ No pong from ${account_id}, logging SUDDEN incident.`);
+      pool.query(
+        `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
+        [account_id, 'SUDDEN', 'Client disconnected or inactive > 5m', now]
+      );
+      ws.terminate();
+      clients.delete(account_id);
+    } else {
+      ws.isAlive = false;
+      ws.ping();
+      if (ws.account_id) {
+        logDistraction(ws.account_id, 'NO ACTIVE ON TAB', 0);
+      }
+    }
+  }
+}, 10 * 1000);
+
+function logDistraction(account_id, status, note = 0) {
+  const timestamp = new Date();
+  pool.query(
+    `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
+    [account_id, status, note, timestamp]
+  ).catch(err => console.error("❌ Failed to log distraction:", err));
+}
+
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
@@ -133,18 +180,10 @@ createTables().then(() => {
   process.exit(1);
 });
 
-// Shutdown gọn gàng khi Railway dừng
 process.on('SIGTERM', () => {
-  console.log('📦 Application is shutting down...');
+  console.log('Application is shutting down...');
   pool.end(() => {
     console.log('Database connection closed');
     process.exit(0);
   });
 });
-
-// ⏰ Self-ping giữ Railway không sleep
-setInterval(() => {
-  fetch('https://chromextension-production.up.railway.app/')
-    .then(() => console.log('⏰ Self-ping to keep Railway alive'))
-    .catch(err => console.error('❌ Self-ping failed:', err.message));
-}, 1000 * 60 * 1); 
