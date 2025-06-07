@@ -141,7 +141,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// ⏱ Ping-Pong logic & log distraction
+// ⏱ Ping-Pong logic
 setInterval(() => {
   const now = new Date();
   for (const [account_id, ws] of clients.entries()) {
@@ -151,19 +151,17 @@ setInterval(() => {
         `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
         [account_id, 'SUDDEN', 'Client disconnected or inactive > 5m', now]
       );
+      logDistraction(account_id, 'NO ACTIVE ON TAB', 0);
       ws.terminate();
       clients.delete(account_id);
     } else {
       ws.isAlive = false;
       ws.ping();
-      if (ws.account_id) {
-        logDistraction(ws.account_id, 'NO ACTIVE ON TAB', 0);
-      }
+      // Ghi log ACTIVE chỉ khi có pong
     }
   }
 }, 10 * 1000);
 
-// 🧠 Hàm ghi distraction_sessions
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
   pool.query(
