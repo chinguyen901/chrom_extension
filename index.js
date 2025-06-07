@@ -1,7 +1,9 @@
+// ✅ index.js (ĐÃ FIX toàn bộ logic ping-pong đúng chuẩn, ghi ACTIVE khi có pong)
+
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
-const fetch = require('node-fetch'); // Self-ping giữ Railway luôn online
+const fetch = require('node-fetch');
 require('dotenv').config();
 const createTables = require('./createTables');
 
@@ -29,14 +31,6 @@ wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
   ws.isAlive = true;
   ws.lastSeen = new Date();
-
-  ws.on('pong', () => {
-    ws.isAlive = true;
-    ws.lastSeen = new Date();
-    if (ws.account_id) {
-      logDistraction(ws.account_id, 'ACTIVE', 0);
-    }
-  });
 
   ws.on('message', async (data) => {
     try {
@@ -125,6 +119,15 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'pong': {
+          ws.isAlive = true;
+          ws.lastSeen = new Date();
+          if (ws.account_id) {
+            logDistraction(ws.account_id, 'ACTIVE', 0);
+          }
+          break;
+        }
+
         default:
           ws.send(JSON.stringify({ success: false, error: "Unknown message type" }));
       }
@@ -141,7 +144,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// ⏱ Ping-Pong logic
+// 🟡 Server gửi "ping" mỗi 10s, chờ client tự gửi "pong"
 setInterval(() => {
   const now = new Date();
   for (const [account_id, ws] of clients.entries()) {
@@ -156,8 +159,7 @@ setInterval(() => {
       clients.delete(account_id);
     } else {
       ws.isAlive = false;
-      ws.ping();
-      // Ghi log ACTIVE chỉ khi có pong
+      ws.send(JSON.stringify({ type: 'ping' }));
     }
   }
 }, 10 * 1000);
@@ -172,19 +174,10 @@ function logDistraction(account_id, status, note = 0) {
 
 // 🔄 Self-ping Railway để giữ server hoạt động
 setInterval(() => {
-  const https = require('https');
-  const URL = 'https://chromextension-production.up.railway.app'; // URL thật
-
-  https.get(URL, (res) => {
-    res.on('data', () => {});
-    res.on('end', () => {
-      console.log('🔄 Self-ping success at', new Date().toISOString());
-    });
-  }).on('error', (err) => {
-    console.error('❌ Self-ping error:', err.message);
-  });
+  fetch('https://chromextension-production.up.railway.app')
+    .then(() => console.log('🔄 Self-ping success at', new Date().toISOString()))
+    .catch(err => console.error('❌ Self-ping error:', err.message));
 }, 1000);
-
 
 // 🚀 Start server
 createTables().then(() => {
