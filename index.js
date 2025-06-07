@@ -1,6 +1,7 @@
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
+const fetch = require('node-fetch'); // Self-ping giữ Railway luôn online
 require('dotenv').config();
 const createTables = require('./createTables');
 
@@ -140,7 +141,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Heartbeat mỗi 10 giây
+// ⏱ Ping-Pong logic & log distraction
 setInterval(() => {
   const now = new Date();
   for (const [account_id, ws] of clients.entries()) {
@@ -162,6 +163,7 @@ setInterval(() => {
   }
 }, 10 * 1000);
 
+// 🧠 Hàm ghi distraction_sessions
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
   pool.query(
@@ -170,6 +172,14 @@ function logDistraction(account_id, status, note = 0) {
   ).catch(err => console.error("❌ Failed to log distraction:", err));
 }
 
+// 🔄 Self-ping Railway để giữ server hoạt động
+setInterval(() => {
+  fetch('https://chromextension-production.up.railway.app/')
+    .then(() => console.log('⏰ Self-ping sent to keep Railway alive.'))
+    .catch(err => console.error('❌ Self-ping failed:', err.message));
+}, 1000 * 60 * 5); // 5 phút
+
+// 🚀 Start server
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
