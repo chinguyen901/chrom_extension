@@ -1,4 +1,4 @@
-// ✅ index.js (có logic gửi force-checkin nếu client không phản hồi > 5 phút)
+// ✅ index.js (phiên bản tối ưu đầy đủ theo yêu cầu)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -6,8 +6,10 @@ const { Pool } = require('pg');
 const fetch = require('node-fetch');
 require('dotenv').config();
 const createTables = require('./createTables');
-const checkinStatus = new Map(); // { account_id: boolean }
 
+const clients = new Map(); // { account_id: ws }
+const inactivityCounters = new Map(); // { account_id: number }
+const checkinStatus = new Map(); // { account_id: boolean }
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -27,8 +29,6 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-const clients = new Map(); // { account_id: ws }
-const inactivityCounters = new Map(); // { account_id: number }
 
 wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
@@ -38,14 +38,14 @@ wss.on('connection', (ws) => {
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
-      const type = msg.type;
+      const { type, account_id } = msg;
 
       if (!type) return ws.send(JSON.stringify({ success: false, error: "Missing message type" }));
 
-      if (msg.account_id) {
-        clients.set(msg.account_id, ws);
-        ws.account_id = msg.account_id;
-        inactivityCounters.set(msg.account_id, 0); // Reset counter on new connection
+      if (account_id) {
+        clients.set(account_id, ws);
+        ws.account_id = account_id;
+        inactivityCounters.set(account_id, 0);
       }
 
       switch (type) {
@@ -64,30 +64,30 @@ wss.on('connection', (ws) => {
         }
 
         case 'log-work': {
-          const { account_id, status, created_at } = msg;
+          const { status, created_at } = msg;
           await pool.query(
             `INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          if (status === 'checkin') {
-            checkinStatus.set(account_id, true);
-          }
+          if (status === 'checkin') checkinStatus.set(account_id, true);
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
         case 'log-break': {
-          const { account_id, status, created_at } = msg;
+          const { status, created_at } = msg;
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
+          if (status === 'break-done') checkinStatus.set(account_id, true);
+          else checkinStatus.set(account_id, false);
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
         case 'log-incident': {
-          const { account_id, status, reason, created_at } = msg;
+          const { status, reason, created_at } = msg;
           await pool.query(
             `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
             [account_id, status || 'unknown', reason || '', created_at || new Date()]
@@ -97,20 +97,18 @@ wss.on('connection', (ws) => {
         }
 
         case 'log-loginout': {
-          const { account_id, status, created_at } = msg;
+          const { status, created_at } = msg;
           await pool.query(
             `INSERT INTO login_logout_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status, created_at || new Date()]
           );
-          if (status === 'checkout') {
-            checkinStatus.set(account_id, false);
-          }
+          if (status === 'checkout') checkinStatus.set(account_id, false);
           ws.send(JSON.stringify({ success: true, type: "log-loginout", status }));
           break;
         }
 
         case 'log-screenshot': {
-          const { account_id, hash, created_at } = msg;
+          const { hash, created_at } = msg;
           await pool.query(
             `INSERT INTO photo_sessions (account_id, hash, created_at) VALUES ($1, $2, $3)`,
             [account_id, hash, created_at || new Date()]
@@ -120,7 +118,7 @@ wss.on('connection', (ws) => {
         }
 
         case 'log-distraction': {
-          const { account_id, status, note, created_at } = msg;
+          const { status, note, created_at } = msg;
           await pool.query(
             `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
             [account_id, status || 'unknown', note || '', created_at || new Date()]
@@ -132,9 +130,9 @@ wss.on('connection', (ws) => {
         case 'pong': {
           ws.isAlive = true;
           ws.lastSeen = new Date();
-          if (ws.account_id && checkinStatus.get(ws.account_id)) {
-            logDistraction(ws.account_id, 'ACTIVE', 0);
-            inactivityCounters.set(ws.account_id, 0); // Reset noactive count
+          if (account_id && shouldPing(account_id)) {
+            logDistraction(account_id, 'ACTIVE', 0);
+            inactivityCounters.set(account_id, 0);
           }
           break;
         }
@@ -159,16 +157,21 @@ wss.on('connection', (ws) => {
   });
 });
 
-// 🟡 Server gửi "ping" mỗi 10s, chờ client tự gửi "pong"
+function shouldPing(account_id) {
+  return checkinStatus.get(account_id) === true;
+}
+
 setInterval(() => {
   const now = new Date();
+
   for (const [account_id, ws] of clients.entries()) {
+    ws.isAlive = false;
+    if (!shouldPing(account_id)) continue;
+
     const lastSeen = ws.lastSeen || now;
     const inactiveFor = now - lastSeen;
-    const isCheckedIn = checkinStatus.get(account_id);
-    if (!isCheckedIn) continue;
 
-    if (ws.isAlive === false || inactiveFor > 10000) {
+    if (inactiveFor > 10000) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
@@ -180,20 +183,17 @@ setInterval(() => {
           `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
           [account_id, 'SUDDEN', 'Client inactive > 5min', now]
         );
-
         try {
           ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
         } catch (e) {
           console.error("❌ Failed to send force-checkin to client:", e.message);
         }
-
         ws.terminate();
         clients.delete(account_id);
         inactivityCounters.delete(account_id);
+        checkinStatus.delete(account_id);
         continue;
       }
-    } else {
-      ws.isAlive = false;
     }
 
     try {
@@ -202,7 +202,7 @@ setInterval(() => {
       console.error("❌ Failed to send ping to", account_id);
     }
   }
-}, 10 * 1000);
+}, 10000);
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
@@ -212,14 +212,12 @@ function logDistraction(account_id, status, note = 0) {
   ).catch(err => console.error("❌ Failed to log distraction:", err));
 }
 
-// 🔄 Self-ping Railway để giữ server hoạt động
 setInterval(() => {
   fetch('https://chromextension-production.up.railway.app')
     .then(() => console.log('🔄 Self-ping success at', new Date().toISOString()))
     .catch(err => console.error('❌ Self-ping error:', err.message));
 }, 1000);
 
-// 🚀 Start server
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
