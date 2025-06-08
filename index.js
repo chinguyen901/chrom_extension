@@ -1,4 +1,4 @@
-// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" sớm và lặp note)
+// ✅ index.js (đã sửa lỗi đếm NO ACTIVE không tăng đều)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -11,6 +11,7 @@ const clients = new Map();
 const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
+const expectingPong = new Map(); // ✅ Biến cờ kiểm soát PONG
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -72,8 +73,9 @@ wss.on('connection', (ws) => {
           );
           if (status === 'checkin') {
             checkinStatus.set(account_id, true);
-            hasPinged.set(account_id, false); // ✅ reset để chờ ping-pong lại từ đầu
-            ws.isAlive = true; // ✅ tránh bị log NO ACTIVE ngay lập tức
+            hasPinged.set(account_id, false);
+            expectingPong.set(account_id, false);
+            ws.isAlive = true;
           }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
@@ -134,12 +136,13 @@ wss.on('connection', (ws) => {
 
         case 'pong': {
           if (account_id && shouldPing(account_id)) {
-            ws.isAlive = true;
-            ws.lastSeen = new Date();
-            if (hasPinged.get(account_id)) {
+            if (expectingPong.get(account_id)) {
+              ws.isAlive = true;
+              ws.lastSeen = new Date();
               logDistraction(account_id, 'ACTIVE', 0);
+              inactivityCounters.set(account_id, 0);
+              expectingPong.set(account_id, false);
             }
-            inactivityCounters.set(account_id, 0);
           }
           break;
         }
@@ -161,6 +164,7 @@ wss.on('connection', (ws) => {
       inactivityCounters.delete(ws.account_id);
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
+      expectingPong.delete(ws.account_id);
     }
   });
 });
@@ -200,12 +204,14 @@ setInterval(() => {
         inactivityCounters.delete(account_id);
         checkinStatus.delete(account_id);
         hasPinged.delete(account_id);
+        expectingPong.delete(account_id);
         continue;
       }
     }
 
     ws.isAlive = false;
     hasPinged.set(account_id, true);
+    expectingPong.set(account_id, true);
 
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
