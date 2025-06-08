@@ -1,4 +1,4 @@
-// ✅ index.js (final fix – LOG ACTIVE đúng, NO ACTIVE tăng đều, không log sai thời điểm)
+// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" sớm và lặp note)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -11,7 +11,6 @@ const clients = new Map();
 const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
-const expectingPong = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -41,7 +40,9 @@ wss.on('connection', (ws) => {
     try {
       const msg = JSON.parse(data);
       const { type, account_id } = msg;
+
       if (!type) return ws.send(JSON.stringify({ success: false, error: "Missing message type" }));
+
       if (account_id) {
         clients.set(account_id, ws);
         ws.account_id = account_id;
@@ -62,31 +63,30 @@ wss.on('connection', (ws) => {
           }
           break;
         }
+
         case 'log-work': {
           const { status, created_at } = msg;
           await pool.query(
             `INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          if (status === 'checkin') {
-            checkinStatus.set(account_id, true);
-            hasPinged.set(account_id, false);
-            expectingPong.set(account_id, false);
-            inactivityCounters.set(account_id, 0);
-          }
+          if (status === 'checkin') checkinStatus.set(account_id, true);
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
+
         case 'log-break': {
           const { status, created_at } = msg;
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          checkinStatus.set(account_id, status === 'break-done');
+          if (status === 'break-done') checkinStatus.set(account_id, true);
+          else checkinStatus.set(account_id, false);
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
+
         case 'log-incident': {
           const { status, reason, created_at } = msg;
           await pool.query(
@@ -96,6 +96,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
+
         case 'log-loginout': {
           const { status, created_at } = msg;
           await pool.query(
@@ -106,6 +107,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ success: true, type: "log-loginout", status }));
           break;
         }
+
         case 'log-screenshot': {
           const { hash, created_at } = msg;
           await pool.query(
@@ -115,6 +117,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ success: true }));
           break;
         }
+
         case 'log-distraction': {
           const { status, note, created_at } = msg;
           await pool.query(
@@ -124,22 +127,23 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ success: true }));
           break;
         }
+
         case 'pong': {
           if (account_id && shouldPing(account_id)) {
-            if (expectingPong.get(account_id)) {
-              ws.isAlive = true;
-              ws.lastSeen = new Date();
-              const count = inactivityCounters.get(account_id) || 0;
-              if (count > 0) logDistraction(account_id, 'ACTIVE', 0);
-              inactivityCounters.set(account_id, 0);
-              expectingPong.set(account_id, false);
+            ws.isAlive = true;
+            ws.lastSeen = new Date();
+            if (hasPinged.get(account_id)) {
+              logDistraction(account_id, 'ACTIVE', 0);
             }
+            inactivityCounters.set(account_id, 0);
           }
           break;
         }
+
         default:
           ws.send(JSON.stringify({ success: false, error: "Unknown message type" }));
       }
+
     } catch (err) {
       console.error("❌ Error processing message:", err);
       ws.send(JSON.stringify({ success: false, error: err.message }));
@@ -153,7 +157,6 @@ wss.on('connection', (ws) => {
       inactivityCounters.delete(ws.account_id);
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
-      expectingPong.delete(ws.account_id);
     }
   });
 });
@@ -164,41 +167,50 @@ function shouldPing(account_id) {
 
 setInterval(() => {
   const now = new Date();
+
   for (const [account_id, ws] of clients.entries()) {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    if (expectingPong.get(account_id) && !ws.isAlive) {
+    const lastSeen = ws.lastSeen || now;
+    const inactiveFor = now - lastSeen;
+
+    if (hasPinged.get(account_id) && (!ws.isAlive || inactiveFor > 10000)) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
+
       logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
       if (count >= 30) {
-        console.warn(`⚠️ No pong from ${account_id} for 5 minutes.`);
+        console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
         pool.query(
           `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
           [account_id, 'SUDDEN', 'Client inactive > 5min', now]
         );
         try {
           ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
-        } catch {}
+        } catch (e) {
+          console.error("❌ Failed to send force-checkin to client:", e.message);
+        }
+
         ws.terminate();
         clients.delete(account_id);
         inactivityCounters.delete(account_id);
         checkinStatus.delete(account_id);
         hasPinged.delete(account_id);
-        expectingPong.delete(account_id);
         continue;
       }
     }
 
     ws.isAlive = false;
     hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);
+
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
-    } catch {}
+    } catch (e) {
+      console.error("❌ Failed to send ping to", account_id);
+    }
   }
 }, 10000);
 
