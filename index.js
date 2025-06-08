@@ -1,14 +1,3 @@
-// server.js – re‑organised logic
-// 1. "noactive" dòng client chủ động gửi log-distraction (không ping/pong)
-// 2. "sudden" server tự ping/pong để phát hiện mất kết nối
-
-const http = require("http");
-const { WebSocketServer } = require("ws");
-const { Pool } = require("pg");
-const fetch = require("node-fetch");
-require("dotenv").config();
-const createTables = require("./createTables");
-
 /*****************************
  * In‑memory state trackers  *
  *****************************/
@@ -17,34 +6,11 @@ const inactivityCounters = new Map(); // account_id -> consecutive missing‑pon
 const checkinStatus = new Map(); // account_id -> boolean|'break-done'
 const expectingPong = new Map(); // account_id -> boolean (waiting?)
 const flagBreak = new Map(); // account_id -> boolean (on break?)
-// 🚫 REMOVED: hasPinged Map – logic "noactive" do client xử lý
+const inactivityNote = new Map(); // account_id -> number of noactive count
 
 /*****************************
- * PostgreSQL pool           *
+ * Incoming messages   *
  *****************************/
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-pool
-  .connect()
-  .then(() => console.log("✅ Database connected successfully."))
-  .catch((err) => {
-    console.error("❌ Failed to connect to the database:", err);
-    process.exit(1);
-  });
-
-/*****************************
- * HTTP & WebSocket servers  *
- *****************************/
-const server = http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("Server is alive");
-});
-
-const wss = new WebSocketServer({ server });
-
 wss.on("connection", (ws) => {
   console.log("✅ New client connected.");
   ws.isAlive = true;
@@ -89,107 +55,39 @@ wss.on("connection", (ws) => {
           break;
         }
 
-        /* -------------- WORK SESSION -------------- */
-        case "log-work": {
-          const { status, created_at } = msg;
-          await pool.query(
-            "INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)",
-            [account_id, status || "unknown", created_at || new Date()]
-          );
-          if (status === "checkin") {
-            checkinStatus.set(account_id, true);
-            ws.isAlive = true; // ensure ping loop knows socket OK
-          }
-          ws.send(JSON.stringify({ success: true, type: status }));
-          break;
-        }
-
-        /* -------------- BREAK SESSION -------------- */
-        case "log-break": {
-          const { status, created_at } = msg;
-          console.log(
-            `Received break status: ${status}, for account_id: ${account_id}`
-          );
-
-          if (status === "break") {
-            flagBreak.set(account_id, true); // stop ping during break
-            ws.isAlive = false;
-            expectingPong.set(account_id, false);
-          } else if (status === "break-done") {
-            flagBreak.set(account_id, false);
-            ws.isAlive = true;
-            expectingPong.set(account_id, false);
-            inactivityCounters.set(account_id, 0);
-            checkinStatus.set(account_id, true);
-          }
-
-          await pool.query(
-            "INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)",
-            [account_id, status || "unknown", created_at || new Date()]
-          );
-          ws.send(JSON.stringify({ success: true, type: status }));
-          break;
-        }
-
-        /* -------------- INCIDENT SESSION -------------- */
-        case "log-incident": {
-          const { status, reason, created_at } = msg;
-          await pool.query(
-            "INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)",
-            [
-              account_id,
-              status || "unknown",
-              reason || "",
-              created_at || new Date(),
-            ]
-          );
-          ws.send(JSON.stringify({ success: true, type: status }));
-          break;
-        }
-
-        /* -------------- LOGIN/LOGOUT -------------- */
-        case "log-loginout": {
-          const { status, created_at } = msg;
-          await pool.query(
-            "INSERT INTO login_logout_sessions (account_id, status, created_at) VALUES ($1, $2, $3)",
-            [account_id, status, created_at || new Date()]
-          );
-          if (status === "checkout") checkinStatus.set(account_id, false);
-          ws.send(
-            JSON.stringify({ success: true, type: "log-loginout", status })
-          );
-          break;
-        }
-
-        /* -------------- SCREENSHOT -------------- */
-        case "log-screenshot": {
-          const { hash, created_at } = msg;
-          await pool.query(
-            "INSERT INTO photo_sessions (account_id, hash, created_at) VALUES ($1, $2, $3)",
-            [account_id, hash, created_at || new Date()]
-          );
-          ws.send(JSON.stringify({ success: true }));
-          break;
-        }
-
         /* -------------- DISTRACTION (noactive) -------------- */
-        // "noactive" logic được xử lý phía client: client tự gửi ACTIVE / NO ACTIVE ON TAB
         case "log-distraction": {
           const { status, note, created_at } = msg;
+          
+          // Lưu trạng thái 'active' / 'noactive' vào bảng distraction_sessions
+          const timestamp = new Date();
+          if (status === "NO ACTIVE") {
+            // Tăng số lần "noactive" nếu là "NO ACTIVE"
+            if (!inactivityNote.has(account_id)) {
+              inactivityNote.set(account_id, 0);
+            }
+            inactivityNote.set(account_id, inactivityNote.get(account_id) + 1);
+          } else {
+            inactivityNote.set(account_id, 0); // Reset count if active
+          }
+          
+          // Ghi vào bảng distraction_sessions
           await pool.query(
             "INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)",
             [
               account_id,
               status || "unknown",
-              note || "",
-              created_at || new Date(),
+              inactivityNote.get(account_id) || 0,
+              created_at || timestamp,
             ]
           );
+
+          // Phản hồi lại client
           ws.send(JSON.stringify({ success: true }));
           break;
         }
 
-        /* -------------- PONG -------------- */
+        /* ---------------- PONG ---------------- */
         case "pong": {
           if (expectingPong.get(account_id)) {
             expectingPong.set(account_id, false);
@@ -222,6 +120,7 @@ wss.on("connection", (ws) => {
       checkinStatus.delete(ws.account_id);
       expectingPong.delete(ws.account_id);
       flagBreak.delete(ws.account_id);
+      inactivityNote.delete(ws.account_id);
     }
   });
 });
@@ -229,12 +128,6 @@ wss.on("connection", (ws) => {
 /*****************************
  * Helper functions          *
  *****************************/
-function shouldPing(account_id) {
-  // ping only when user is checked‑in & not on break
-  const status = checkinStatus.get(account_id);
-  return status === true || status === "break-done";
-}
-
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
   pool
@@ -306,36 +199,3 @@ setInterval(() => {
   }
 }, 10000);
 
-/*****************************
- * Keep‑alive to Railway     *
- *****************************/
-setInterval(() => {
-  fetch("https://chromextension-production.up.railway.app")
-    .then(() =>
-      console.log("🔄 Self‑ping success at", new Date().toISOString())
-    )
-    .catch((err) => console.error("❌ Self‑ping error:", err.message));
-}, 1000);
-
-/*****************************
- * Bootstrap + shutdown      *
- *****************************/
-createTables()
-  .then(() => {
-    const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () =>
-      console.log(`✅ WebSocket server running on ws://localhost:${PORT}`)
-    );
-  })
-  .catch((err) => {
-    console.error("❌ Failed to create tables:", err);
-    process.exit(1);
-  });
-
-process.on("SIGTERM", () => {
-  console.log("Application is shutting down...");
-  pool.end(() => {
-    console.log("Database connection closed");
-    process.exit(0);
-  });
-});
