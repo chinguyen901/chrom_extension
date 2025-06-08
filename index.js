@@ -10,6 +10,7 @@ const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
 const expectingPong = new Map();
+const flagBreak = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -34,7 +35,8 @@ wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
   ws.isAlive = true;
   ws.lastSeen = new Date();
-
+  const account_id = ws.account_id;
+  flagBreak.set(account_id, false);
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
@@ -78,16 +80,14 @@ wss.on('connection', (ws) => {
 
         case 'log-break': {
           const { status, created_at } = msg;
-          if (status === 'break-done') {
-            checkinStatus.set(account_id, 'checkin');  // Chuyển về trạng thái làm việc (checkin)
-            logDistraction(account_id, 'ACTIVE', 0);   // Gửi log ACTIVE khi chuyển về checkin
-        
-            // Gửi ping lại cho client để kiểm tra hoạt động
-            try {
-              ws.send(JSON.stringify({ type: 'ping' }));
-            } catch (e) {
-              console.error("❌ Failed to send ping to", account_id);
-            }
+          if (status === 'break') {
+            // Khi nhận thông tin break từ client, đặt flagBreak = true
+            flagBreak.set(account_id, true);
+            ws.isAlive = false; // Không gửi ping khi đang nghỉ
+          } else if (status === 'break-done') {
+            // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
+            flagBreak.set(account_id, false);
+            ws.isAlive = true;
           }
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
