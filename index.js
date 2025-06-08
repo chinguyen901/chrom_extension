@@ -137,7 +137,6 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
-              inactivityCounters.set(account_id, 0); // ✅ chỉ reset khi đang chờ pong
               expectingPong.set(account_id, false);  // ✅ tắt cờ
             }
             ws.isAlive = true;
@@ -228,10 +227,16 @@ setInterval(() => {
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
+
   pool.query(
     `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
     [account_id, status, note, timestamp]
-  ).catch(err => console.error("❌ Failed to log distraction:", err));
+  ).then(() => {
+    // ✅ Reset count nếu là ACTIVE
+    if (status === 'ACTIVE') {
+      inactivityCounters.set(account_id, 0);
+    }
+  }).catch(err => console.error("❌ Failed to log distraction:", err));
 }
 
 setInterval(() => {
