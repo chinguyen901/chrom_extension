@@ -139,14 +139,9 @@ wss.on('connection', (ws) => {
             if (expectingPong.get(account_id)) {
               ws.isAlive = true;
               ws.lastSeen = new Date();
-        
-              let count = inactivityCounters.get(account_id) || 0;
-              if (count > 0) {
-                logDistraction(account_id, 'ACTIVE', 0);
-              }
-        
-              inactivityCounters.set(account_id, 0); // ✅ Chỉ reset khi đúng kỳ ping
-              expectingPong.set(account_id, false); // ✅ Đánh dấu đã phản hồi
+              logDistraction(account_id, 'ACTIVE', 0);
+              inactivityCounters.set(account_id, 0);
+              expectingPong.set(account_id, false);
             }
           }
           break;
