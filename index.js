@@ -11,6 +11,7 @@ const clients = new Map();
 const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
+const expectingPong = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -134,12 +135,13 @@ wss.on('connection', (ws) => {
 
         case 'pong': {
           if (account_id && shouldPing(account_id)) {
-            if (hasPinged.get(account_id)) {
+            if (expectingPong.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
+              inactivityCounters.set(account_id, 0); // ✅ chỉ reset khi đang chờ pong
+              expectingPong.set(account_id, false);  // ✅ tắt cờ
             }
             ws.isAlive = true;
             ws.lastSeen = new Date();
-            inactivityCounters.set(account_id, 0);
           }
           break;
         }
@@ -209,6 +211,7 @@ setInterval(() => {
 
     ws.isAlive = false;
     hasPinged.set(account_id, true);
+    expectingPong.set(account_id, true);
 
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
