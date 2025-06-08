@@ -191,7 +191,7 @@ setInterval(() => {
     // Gửi ping cho client
     ws.isAlive = false;
     hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);
+    expectingPong.set(account_id, true);  // Đánh dấu là đang chờ pong
 
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
@@ -201,7 +201,7 @@ setInterval(() => {
   }
 }, 30000); // Gửi ping mỗi 30 giây
 
-// Kiểm tra mỗi 30 giây nếu không nhận được pong
+// Kiểm tra mỗi 10 giây xem có nhận được pong không
 setInterval(() => {
   const now = Date.now();
 
@@ -212,8 +212,9 @@ setInterval(() => {
     const lastPingSent = lastPingSentAt.get(account_id);
     const inactiveFor = now - lastPingSent;
 
+    // Nếu đang chờ pong và không nhận được pong trong 30s
     if (expectingPong.get(account_id)) {
-      if (inactiveFor > 30000) { // 30 giây không nhận được pong từ client
+      if (inactiveFor >= 30000) {  // 30 giây không nhận được pong
         // Ghi log SUDDEN
         console.warn(`⚠️ No pong from ${account_id} for 30 seconds. Logging SUDDEN.`);
 
@@ -240,6 +241,7 @@ setInterval(() => {
     }
   }
 }, 10000); // Kiểm tra mỗi 10 giây nếu pong đã đến sau 30 giây
+
 
 
 setInterval(() => {
