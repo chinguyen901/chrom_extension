@@ -6,6 +6,8 @@ const { Pool } = require('pg');
 const fetch = require('node-fetch');
 require('dotenv').config();
 const createTables = require('./createTables');
+const checkinStatus = new Map(); // { account_id: boolean }
+
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -67,6 +69,9 @@ wss.on('connection', (ws) => {
             `INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
+          if (status === 'checkin') {
+            checkinStatus.set(account_id, true);
+          }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
@@ -97,6 +102,9 @@ wss.on('connection', (ws) => {
             `INSERT INTO login_logout_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status, created_at || new Date()]
           );
+          if (status === 'checkout') {
+            checkinStatus.set(account_id, false);
+          }
           ws.send(JSON.stringify({ success: true, type: "log-loginout", status }));
           break;
         }
@@ -124,7 +132,7 @@ wss.on('connection', (ws) => {
         case 'pong': {
           ws.isAlive = true;
           ws.lastSeen = new Date();
-          if (ws.account_id) {
+          if (ws.account_id && checkinStatus.get(ws.account_id)) {
             logDistraction(ws.account_id, 'ACTIVE', 0);
             inactivityCounters.set(ws.account_id, 0); // Reset noactive count
           }
@@ -146,6 +154,7 @@ wss.on('connection', (ws) => {
     if (ws.account_id) {
       clients.delete(ws.account_id);
       inactivityCounters.delete(ws.account_id);
+      checkinStatus.delete(ws.account_id);
     }
   });
 });
@@ -156,6 +165,8 @@ setInterval(() => {
   for (const [account_id, ws] of clients.entries()) {
     const lastSeen = ws.lastSeen || now;
     const inactiveFor = now - lastSeen;
+    const isCheckedIn = checkinStatus.get(account_id);
+    if (!isCheckedIn) continue;
 
     if (ws.isAlive === false || inactiveFor > 10000) {
       let count = inactivityCounters.get(account_id) || 0;
