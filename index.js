@@ -84,20 +84,10 @@ wss.on('connection', (ws) => {
             // Khi nhận thông tin break từ client, đặt flagBreak = true
             flagBreak.set(account_id, true);
             ws.isAlive = false; // Không gửi ping khi đang nghỉ
-            logDistraction(account_id, 'ON BREAK', 0);
           } else if (status === 'break-done') {
             // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
             flagBreak.set(account_id, false);
-            ws.isAlive = true;  // Đặt isAlive về true để tiếp tục gửi ping cho client
-            logDistraction(account_id, 'ACTIVE', 0);
-        
-            // Gửi ping lại cho client sau khi nghỉ xong
-            try {
-              ws.send(JSON.stringify({ type: 'ping' }));
-            } catch (e) {
-              console.error("❌ Failed to send ping to", account_id);
-            }
-          }
+            ws.isAlive = true;  // Đặt isAlive về true để tiếp tục gửi ping cho client        
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
@@ -192,7 +182,7 @@ setInterval(() => {
   for (const [account_id, ws] of clients.entries()) {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
-
+    if (flagBreak(account_id)) continue;
     const inactiveFor = now - (ws.lastSeen || now);
 
     // Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
