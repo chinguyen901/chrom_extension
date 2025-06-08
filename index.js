@@ -132,7 +132,8 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
-              expectingPong.set(account_id, false);
+              // Reset count only after sending log "ACTIVE"
+              expectingPong.set(account_id, false);  // Tắt cờ chờ pong
             }
             ws.isAlive = true;
             ws.lastSeen = new Date();
@@ -175,7 +176,7 @@ setInterval(() => {
 
     const inactiveFor = now - (ws.lastSeen || now);
 
-    // ✅ Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
+    // If waiting for pong response
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
@@ -183,7 +184,6 @@ setInterval(() => {
         inactivityCounters.set(account_id, count);
         logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
-        // Sau 30 lần không nhận pong, log "SUDDEN" và disconnect
         if (count >= 30) {
           console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
           pool.query(
@@ -207,12 +207,11 @@ setInterval(() => {
       }
     }
 
-    // ✅ Nếu nhận được pong, reset trạng thái
+    // ✅ Send a ping if necessary
     ws.isAlive = false;
     hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);  // Cờ đánh dấu đang chờ pong
+    expectingPong.set(account_id, true);  // Flag to indicate waiting for pong response
 
-    // ✅ Gửi ping nếu đang hoạt động
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch (e) {
@@ -221,13 +220,13 @@ setInterval(() => {
   }
 }, 10000);
 
-
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
   pool.query(
     `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
     [account_id, status, note, timestamp]
   ).then(() => {
+    // Reset count if ACTIVE
     if (status === 'ACTIVE') {
       inactivityCounters.set(account_id, 0);
     }
