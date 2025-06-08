@@ -84,20 +84,27 @@ wss.on('connection', (ws) => {
             // Khi nhận thông tin break từ client, đặt flagBreak = true
             flagBreak.set(account_id, true);
             ws.isAlive = false; // Không gửi ping khi đang nghỉ
+            // Tắt cờ chờ pong vì client không được ping khi nghỉ
+            expectingPong.set(account_id, false); 
+            hasPinged.set(account_id, false); 
           } else if (status === 'break-done') {
             // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
             flagBreak.set(account_id, false);
-            ws.isAlive = true;
-                // Đảm bảo các trạng thái liên quan đến ping-pong cũng được xử lý đúng
+            ws.isAlive = true;  // Đặt isAlive về true để tiếp tục gửi ping cho client    
+
+            // Reset các trạng thái ping pong
             expectingPong.set(account_id, false); // Không còn chờ pong nữa sau khi break xong
             hasPinged.set(account_id, false);     // Reset trạng thái ping
-            inactivityCounters.set(account_id, 0);
-          }  // Đặt isAlive về true để tiếp tục gửi ping cho client        
-          await pool.query(
-            `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
-            [account_id, status || 'unknown', created_at || new Date()]
-          );
-          ws.send(JSON.stringify({ success: true, type: status }));
+            inactivityCounters.set(account_id, 0); // Reset counter nếu đã trở lại từ break
+            
+            await pool.query(
+              `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
+              [account_id, status || 'unknown', created_at || new Date()]
+            );
+
+            // Gửi thông báo thành công cho client
+            ws.send(JSON.stringify({ success: true, type: status }));
+          }
           break;
         }
 
@@ -190,7 +197,6 @@ setInterval(() => {
     if (flagBreak.get(account_id)) continue;
     const inactiveFor = now - (ws.lastSeen || now);
 
-    // Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
@@ -221,7 +227,6 @@ setInterval(() => {
       }
     }
 
-    // Gửi ping nếu cần
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);  // Đánh dấu đang chờ pong
@@ -240,7 +245,6 @@ function logDistraction(account_id, status, note = 0) {
     `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
     [account_id, status, note, timestamp]
   ).then(() => {
-    // Reset count if ACTIVE
     if (status === 'ACTIVE') {
       inactivityCounters.set(account_id, 0);
     }
