@@ -88,17 +88,16 @@ wss.on('connection', (ws) => {
             // Tắt cờ chờ pong vì client không được ping khi nghỉ
             expectingPong.set(account_id, false); 
             hasPinged.set(account_id, false); 
-            console.log(`Account ${account_id} is now on break.`);
           } else if (status === 'break-done') {
             // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
             flagBreak.set(account_id, false);
             ws.isAlive = true;  // Đặt isAlive về true để tiếp tục gửi ping cho client    
-            console.log(`Account ${account_id} has finished break.`);
         
             // Reset các trạng thái ping pong
             expectingPong.set(account_id, false); // Không còn chờ pong nữa sau khi break xong
             hasPinged.set(account_id, false);     // Reset trạng thái ping
             inactivityCounters.set(account_id, 0); // Reset counter nếu đã trở lại từ break
+            checkinStatus.set(account_id, true)
           }
           await pool.query(
               `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
@@ -187,7 +186,10 @@ wss.on('connection', (ws) => {
 });
 
 function shouldPing(account_id) {
-  return checkinStatus.get(account_id) === true || checkinStatus.get(account_id) === 'break-done';
+  // Kiểm tra nếu trạng thái checkinStatus là true hoặc 'break-done'
+  const status = checkinStatus.get(account_id);
+  console.log(`Should ping for account ${account_id}: ${status}`); // Debug log
+  return status === true || status === 'break-done';
 }
 
 setInterval(() => {
