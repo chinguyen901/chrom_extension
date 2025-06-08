@@ -70,7 +70,11 @@ wss.on('connection', (ws) => {
             `INSERT INTO work_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          if (status === 'checkin') checkinStatus.set(account_id, true);
+          if (status === 'checkin') {
+            checkinStatus.set(account_id, true);
+            hasPinged.set(account_id, false); // ✅ reset để chờ ping-pong lại từ đầu
+            ws.isAlive = true; // ✅ tránh bị log NO ACTIVE ngay lập tức
+          }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
@@ -172,10 +176,7 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    const lastSeen = ws.lastSeen || now;
-    const inactiveFor = now - lastSeen;
-
-    if (hasPinged.get(account_id) && (!ws.isAlive || inactiveFor > 10000)) {
+    if (hasPinged.get(account_id) && ws.isAlive === false) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
@@ -213,6 +214,7 @@ setInterval(() => {
     }
   }
 }, 10000);
+
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
