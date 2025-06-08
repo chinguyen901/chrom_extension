@@ -132,9 +132,8 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
-              // Reset count only after sending log "ACTIVE"
               expectingPong.set(account_id, false);  // Tắt cờ chờ pong
-              inactivityCounters.set(account_id, 0);
+              inactivityCounters.set(account_id, 0); // ✅ Reset count only after log "ACTIVE"
             }
             ws.isAlive = true;
             ws.lastSeen = new Date();
@@ -177,7 +176,7 @@ setInterval(() => {
 
     const inactiveFor = now - (ws.lastSeen || now);
 
-    // If waiting for pong response
+    // Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
@@ -208,10 +207,10 @@ setInterval(() => {
       }
     }
 
-    // ✅ Send a ping if necessary
+    // Gửi ping nếu cần
     ws.isAlive = false;
     hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);  // Flag to indicate waiting for pong response
+    expectingPong.set(account_id, true);  // Đánh dấu đang chờ pong
 
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
