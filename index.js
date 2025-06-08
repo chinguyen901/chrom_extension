@@ -83,6 +83,12 @@ wss.on('connection', (ws) => {
             [account_id, status || 'unknown', created_at || new Date()]
           );
           checkinStatus.set(account_id, status === 'break-done');
+          if (status === 'break-done') {
+            logDistraction(account_id, 'ACTIVE', 0); // Gửi log ACTIVE
+            inactivityCounters.set(account_id, 0); // Reset count sau khi nghỉ xong
+            expectingPong.set(account_id, false);  // Tắt cờ chờ pong khi quay lại làm việc
+          }
+
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
