@@ -182,7 +182,7 @@ setInterval(() => {
   for (const [account_id, ws] of clients.entries()) {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
-    if (flagBreak(account_id)) continue;
+    if (flagBreak.get(account_id)) continue;
     const inactiveFor = now - (ws.lastSeen || now);
 
     // Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
