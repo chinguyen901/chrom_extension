@@ -1,4 +1,4 @@
-// ✅ index.js (phiên bản tối ưu đầy đủ theo yêu cầu)
+// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" sớm và lặp note)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -7,9 +7,10 @@ const fetch = require('node-fetch');
 require('dotenv').config();
 const createTables = require('./createTables');
 
-const clients = new Map(); // { account_id: ws }
-const inactivityCounters = new Map(); // { account_id: number }
-const checkinStatus = new Map(); // { account_id: boolean }
+const clients = new Map();
+const inactivityCounters = new Map();
+const checkinStatus = new Map();
+const hasPinged = new Map();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -131,7 +132,9 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             ws.isAlive = true;
             ws.lastSeen = new Date();
-            logDistraction(account_id, 'ACTIVE', 0);
+            if (hasPinged.get(account_id)) {
+              logDistraction(account_id, 'ACTIVE', 0);
+            }
             inactivityCounters.set(account_id, 0);
           }
           break;
@@ -153,6 +156,7 @@ wss.on('connection', (ws) => {
       clients.delete(ws.account_id);
       inactivityCounters.delete(ws.account_id);
       checkinStatus.delete(ws.account_id);
+      hasPinged.delete(ws.account_id);
     }
   });
 });
@@ -165,18 +169,13 @@ setInterval(() => {
   const now = new Date();
 
   for (const [account_id, ws] of clients.entries()) {
-    // ✅ Bỏ qua nếu chưa CHECKIN hoặc đã CHECKOUT
     if (!shouldPing(account_id)) continue;
-
-    // ✅ Kiểm tra socket vẫn mở
     if (ws.readyState !== ws.OPEN) continue;
 
-    // ✅ Tính thời gian không hoạt động
     const lastSeen = ws.lastSeen || now;
     const inactiveFor = now - lastSeen;
 
-    // ✅ Nếu không nhận pong trong 10s
-    if (!ws.isAlive || inactiveFor > 10000) {
+    if (hasPinged.get(account_id) && (!ws.isAlive || inactiveFor > 10000)) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
@@ -199,12 +198,13 @@ setInterval(() => {
         clients.delete(account_id);
         inactivityCounters.delete(account_id);
         checkinStatus.delete(account_id);
+        hasPinged.delete(account_id);
         continue;
       }
     }
 
-    // ✅ Trước khi gửi ping, gắn lại isAlive = false → sẽ được cập nhật thành true nếu client phản hồi pong
     ws.isAlive = false;
+    hasPinged.set(account_id, true);
 
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
@@ -213,7 +213,6 @@ setInterval(() => {
     }
   }
 }, 10000);
-
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
