@@ -1,4 +1,4 @@
-// ✅ index.js (final fix – log ACTIVE/NO ACTIVE đúng, tăng đều, không log sớm)
+// ✅ index.js (final fix – LOG ACTIVE đúng, NO ACTIVE tăng đều, không log sai thời điểm)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -34,6 +34,9 @@ const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
   console.log("✅ New client connected.");
+  ws.isAlive = true;
+  ws.lastSeen = new Date();
+
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
@@ -125,12 +128,11 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               ws.isAlive = true;
-              expectingPong.set(account_id, false);
+              ws.lastSeen = new Date();
               const count = inactivityCounters.get(account_id) || 0;
-              if (count > 0) {
-                logDistraction(account_id, 'ACTIVE', 0);
-              }
+              if (count > 0) logDistraction(account_id, 'ACTIVE', 0);
               inactivityCounters.set(account_id, 0);
+              expectingPong.set(account_id, false);
             }
           }
           break;
@@ -166,13 +168,14 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    if (expectingPong.get(account_id) && ws.isAlive === false) {
+    if (expectingPong.get(account_id) && !ws.isAlive) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
       logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
       if (count >= 30) {
+        console.warn(`⚠️ No pong from ${account_id} for 5 minutes.`);
         pool.query(
           `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
           [account_id, 'SUDDEN', 'Client inactive > 5min', now]
@@ -190,15 +193,12 @@ setInterval(() => {
       }
     }
 
-    if (!expectingPong.get(account_id)) {
-      ws.isAlive = false;
-      expectingPong.set(account_id, true);
-      try {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      } catch (e) {
-        console.error(`❌ Failed to send ping to ${account_id}:`, e.message);
-      }
-    }
+    ws.isAlive = false;
+    hasPinged.set(account_id, true);
+    expectingPong.set(account_id, true);
+    try {
+      ws.send(JSON.stringify({ type: 'ping' }));
+    } catch {}
   }
 }, 10000);
 
