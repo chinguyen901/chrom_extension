@@ -175,6 +175,7 @@ setInterval(() => {
 
     const inactiveFor = now - (ws.lastSeen || now);
 
+    // ✅ Nếu đang chờ pong và chưa nhận được pong trong thời gian quy định
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
@@ -182,6 +183,7 @@ setInterval(() => {
         inactivityCounters.set(account_id, count);
         logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
+        // Sau 30 lần không nhận pong, log "SUDDEN" và disconnect
         if (count >= 30) {
           console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
           pool.query(
@@ -205,10 +207,12 @@ setInterval(() => {
       }
     }
 
-    // ✅ Gửi ping mới nếu cần
+    // ✅ Nếu nhận được pong, reset trạng thái
     ws.isAlive = false;
     hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);
+    expectingPong.set(account_id, true);  // Cờ đánh dấu đang chờ pong
+
+    // ✅ Gửi ping nếu đang hoạt động
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch (e) {
@@ -216,6 +220,7 @@ setInterval(() => {
     }
   }
 }, 10000);
+
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
