@@ -128,9 +128,9 @@ wss.on('connection', (ws) => {
         }
 
         case 'pong': {
-          ws.isAlive = true;
-          ws.lastSeen = new Date();
           if (account_id && shouldPing(account_id)) {
+            ws.isAlive = true;
+            ws.lastSeen = new Date();
             logDistraction(account_id, 'ACTIVE', 0);
             inactivityCounters.set(account_id, 0);
           }
@@ -165,16 +165,22 @@ setInterval(() => {
   const now = new Date();
 
   for (const [account_id, ws] of clients.entries()) {
-    ws.isAlive = false;
+    // ✅ Bỏ qua nếu chưa CHECKIN hoặc đã CHECKOUT
     if (!shouldPing(account_id)) continue;
 
+    // ✅ Kiểm tra socket vẫn mở
+    if (ws.readyState !== ws.OPEN) continue;
+
+    // ✅ Tính thời gian không hoạt động
     const lastSeen = ws.lastSeen || now;
     const inactiveFor = now - lastSeen;
 
-    if (inactiveFor > 10000) {
+    // ✅ Nếu không nhận pong trong 10s
+    if (!ws.isAlive || inactiveFor > 10000) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
+
       logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
       if (count >= 30) {
@@ -188,6 +194,7 @@ setInterval(() => {
         } catch (e) {
           console.error("❌ Failed to send force-checkin to client:", e.message);
         }
+
         ws.terminate();
         clients.delete(account_id);
         inactivityCounters.delete(account_id);
@@ -196,6 +203,9 @@ setInterval(() => {
       }
     }
 
+    // ✅ Trước khi gửi ping, gắn lại isAlive = false → sẽ được cập nhật thành true nếu client phản hồi pong
+    ws.isAlive = false;
+
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch (e) {
@@ -203,6 +213,7 @@ setInterval(() => {
     }
   }
 }, 10000);
+
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
