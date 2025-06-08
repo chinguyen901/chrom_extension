@@ -1,4 +1,4 @@
-// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" và log đúng ACTIVE)
+// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" không ghi log)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -140,11 +140,9 @@ wss.on('connection', (ws) => {
             const now = Date.now();
             const responseDelay = now - sentAt;
 
-            if (expectingPong.get(account_id)) {
-              if (responseDelay >= 500 && responseDelay <= 11000) {
-                logDistraction(account_id, 'ACTIVE', 0);
-                inactivityCounters.set(account_id, 0);
-              }
+            if (expectingPong.get(account_id) && responseDelay >= 500 && responseDelay <= 11000) {
+              logDistraction(account_id, 'ACTIVE', 0);
+              inactivityCounters.set(account_id, 0);
               expectingPong.set(account_id, false);
             }
 
@@ -157,6 +155,7 @@ wss.on('connection', (ws) => {
         default:
           ws.send(JSON.stringify({ success: false, error: "Unknown message type" }));
       }
+
     } catch (err) {
       console.error("❌ Error processing message:", err);
       ws.send(JSON.stringify({ success: false, error: err.message }));
@@ -171,7 +170,6 @@ wss.on('connection', (ws) => {
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
       expectingPong.delete(ws.account_id);
-      lastPingSentAt.delete(ws.account_id);
     }
   });
 });
@@ -181,13 +179,13 @@ function shouldPing(account_id) {
 }
 
 setInterval(() => {
-  const now = Date.now();
+  const now = new Date();
 
   for (const [account_id, ws] of clients.entries()) {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    const inactiveFor = now - (ws.lastSeen?.getTime?.() || now);
+    const inactiveFor = now - (ws.lastSeen || now);
 
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
@@ -200,7 +198,7 @@ setInterval(() => {
           console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
           pool.query(
             `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
-            [account_id, 'SUDDEN', 'Client inactive > 5min', new Date()]
+            [account_id, 'SUDDEN', 'Client inactive > 5min', now]
           );
           try {
             ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
@@ -214,13 +212,12 @@ setInterval(() => {
           checkinStatus.delete(account_id);
           hasPinged.delete(account_id);
           expectingPong.delete(account_id);
-          lastPingSentAt.delete(account_id);
           continue;
         }
       }
     }
 
-    lastPingSentAt.set(account_id, now);
+    lastPingSentAt.set(account_id, Date.now());
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
