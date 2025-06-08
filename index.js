@@ -78,11 +78,21 @@ wss.on('connection', (ws) => {
 
         case 'log-break': {
           const { status, created_at } = msg;
+          if (status === 'break-done') {
+            checkinStatus.set(account_id, 'checkin');  // Chuyển về trạng thái làm việc (checkin)
+            logDistraction(account_id, 'ACTIVE', 0);   // Gửi log ACTIVE khi chuyển về checkin
+        
+            // Gửi ping lại cho client để kiểm tra hoạt động
+            try {
+              ws.send(JSON.stringify({ type: 'ping' }));
+            } catch (e) {
+              console.error("❌ Failed to send ping to", account_id);
+            }
+          }
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          checkinStatus.set(account_id, status === 'break-done');
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
