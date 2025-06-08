@@ -134,6 +134,7 @@ wss.on('connection', (ws) => {
               logDistraction(account_id, 'ACTIVE', 0);
               // Reset count only after sending log "ACTIVE"
               expectingPong.set(account_id, false);  // Tắt cờ chờ pong
+              inactivityCounters.set(account_id, 0);
             }
             ws.isAlive = true;
             ws.lastSeen = new Date();
