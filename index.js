@@ -1,5 +1,3 @@
-// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" không ghi log)
-
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
@@ -41,7 +39,6 @@ wss.on('connection', (ws) => {
     try {
       const msg = JSON.parse(data);
       const { type, account_id } = msg;
-
       if (!type) return ws.send(JSON.stringify({ success: false, error: "Missing message type" }));
 
       if (account_id) {
@@ -86,8 +83,7 @@ wss.on('connection', (ws) => {
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          if (status === 'break-done') checkinStatus.set(account_id, true);
-          else checkinStatus.set(account_id, false);
+          checkinStatus.set(account_id, status === 'break-done');
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
@@ -137,7 +133,7 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
-              expectingPong.set(account_id, false);  // ✅ tắt cờ
+              expectingPong.set(account_id, false);
             }
             ws.isAlive = true;
             ws.lastSeen = new Date();
@@ -180,7 +176,6 @@ setInterval(() => {
 
     const inactiveFor = now - (ws.lastSeen || now);
 
-    // ✅ Nếu đang chờ pong mà chưa nhận được phản hồi
     if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
@@ -211,11 +206,10 @@ setInterval(() => {
       }
     }
 
-    // ✅ Gửi ping mới
+    // ✅ Gửi ping mới nếu cần
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
-
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch (e) {
@@ -224,15 +218,12 @@ setInterval(() => {
   }
 }, 10000);
 
-
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
-
   pool.query(
     `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
     [account_id, status, note, timestamp]
   ).then(() => {
-    // ✅ Reset count nếu là ACTIVE
     if (status === 'ACTIVE') {
       inactivityCounters.set(account_id, 0);
     }
