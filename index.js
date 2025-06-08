@@ -44,7 +44,6 @@ wss.on('connection', (ws) => {
       if (account_id) {
         clients.set(account_id, ws);
         ws.account_id = account_id;
-        inactivityCounters.set(account_id, 0);
       }
 
       switch (type) {
