@@ -1,4 +1,4 @@
-// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" sớm và lặp note)
+// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" không ghi log)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -72,8 +72,8 @@ wss.on('connection', (ws) => {
           );
           if (status === 'checkin') {
             checkinStatus.set(account_id, true);
-            hasPinged.set(account_id, false); // ✅ reset để chờ ping-pong lại từ đầu
-            ws.isAlive = true; // ✅ tránh bị log NO ACTIVE ngay lập tức
+            hasPinged.set(account_id, false);
+            ws.isAlive = true;
           }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
@@ -134,11 +134,11 @@ wss.on('connection', (ws) => {
 
         case 'pong': {
           if (account_id && shouldPing(account_id)) {
-            ws.isAlive = true;
-            ws.lastSeen = new Date();
             if (hasPinged.get(account_id)) {
               logDistraction(account_id, 'ACTIVE', 0);
             }
+            ws.isAlive = true;
+            ws.lastSeen = new Date();
             inactivityCounters.set(account_id, 0);
           }
           break;
@@ -176,31 +176,34 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    if (hasPinged.get(account_id) && ws.isAlive === false) {
-      let count = inactivityCounters.get(account_id) || 0;
-      count++;
-      inactivityCounters.set(account_id, count);
+    const inactiveFor = now - (ws.lastSeen || now);
 
-      logDistraction(account_id, 'NO ACTIVE ON TAB', count);
+    if (hasPinged.get(account_id)) {
+      if (!ws.isAlive || inactiveFor > 10000) {
+        let count = inactivityCounters.get(account_id) || 0;
+        count++;
+        inactivityCounters.set(account_id, count);
+        logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
-      if (count >= 30) {
-        console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
-        pool.query(
-          `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
-          [account_id, 'SUDDEN', 'Client inactive > 5min', now]
-        );
-        try {
-          ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
-        } catch (e) {
-          console.error("❌ Failed to send force-checkin to client:", e.message);
+        if (count >= 30) {
+          console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
+          pool.query(
+            `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
+            [account_id, 'SUDDEN', 'Client inactive > 5min', now]
+          );
+          try {
+            ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
+          } catch (e) {
+            console.error("❌ Failed to send force-checkin to client:", e.message);
+          }
+
+          ws.terminate();
+          clients.delete(account_id);
+          inactivityCounters.delete(account_id);
+          checkinStatus.delete(account_id);
+          hasPinged.delete(account_id);
+          continue;
         }
-
-        ws.terminate();
-        clients.delete(account_id);
-        inactivityCounters.delete(account_id);
-        checkinStatus.delete(account_id);
-        hasPinged.delete(account_id);
-        continue;
       }
     }
 
@@ -214,7 +217,6 @@ setInterval(() => {
     }
   }
 }, 10000);
-
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
