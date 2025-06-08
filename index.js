@@ -80,6 +80,7 @@ wss.on('connection', (ws) => {
 
         case 'log-break': {
           const { status, created_at } = msg;
+          console.log(`Received break status: ${status}, for account_id: ${account_id}`);
           if (status === 'break') {
             // Khi nhận thông tin break từ client, đặt flagBreak = true
             flagBreak.set(account_id, true);
@@ -87,24 +88,25 @@ wss.on('connection', (ws) => {
             // Tắt cờ chờ pong vì client không được ping khi nghỉ
             expectingPong.set(account_id, false); 
             hasPinged.set(account_id, false); 
+            console.log(`Account ${account_id} is now on break.`);
           } else if (status === 'break-done') {
             // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
             flagBreak.set(account_id, false);
             ws.isAlive = true;  // Đặt isAlive về true để tiếp tục gửi ping cho client    
-
+            console.log(`Account ${account_id} has finished break.`);
+        
             // Reset các trạng thái ping pong
             expectingPong.set(account_id, false); // Không còn chờ pong nữa sau khi break xong
             hasPinged.set(account_id, false);     // Reset trạng thái ping
             inactivityCounters.set(account_id, 0); // Reset counter nếu đã trở lại từ break
-            
-            await pool.query(
+          }
+          await pool.query(
               `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
               [account_id, status || 'unknown', created_at || new Date()]
             );
-
+        
             // Gửi thông báo thành công cho client
-            ws.send(JSON.stringify({ success: true, type: status }));
-          }
+          ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
