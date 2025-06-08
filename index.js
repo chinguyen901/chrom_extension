@@ -1,4 +1,4 @@
-// ✅ index.js (final fix – NO ACTIVE tăng đều, không log sớm, ACTIVE log đúng)
+// ✅ index.js (final fix – log ACTIVE/NO ACTIVE đúng, tăng đều, không log sớm)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -12,7 +12,6 @@ const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
 const expectingPong = new Map();
-const hasPingCycleStarted = new Map(); // ✅ mới thêm
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -70,7 +69,7 @@ wss.on('connection', (ws) => {
             checkinStatus.set(account_id, true);
             hasPinged.set(account_id, false);
             expectingPong.set(account_id, false);
-            hasPingCycleStarted.set(account_id, false); // ✅ reset chu kỳ ping
+            inactivityCounters.set(account_id, 0);
           }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
@@ -153,7 +152,6 @@ wss.on('connection', (ws) => {
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
       expectingPong.delete(ws.account_id);
-      hasPingCycleStarted.delete(ws.account_id);
     }
   });
 });
@@ -168,14 +166,13 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    if (hasPingCycleStarted.get(account_id) && expectingPong.get(account_id) && ws.isAlive === false) {
+    if (expectingPong.get(account_id) && ws.isAlive === false) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
       logDistraction(account_id, 'NO ACTIVE ON TAB', count);
 
       if (count >= 30) {
-        console.warn(`⚠️ No pong from ${account_id} for 5 minutes.`);
         pool.query(
           `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
           [account_id, 'SUDDEN', 'Client inactive > 5min', now]
@@ -189,13 +186,11 @@ setInterval(() => {
         checkinStatus.delete(account_id);
         hasPinged.delete(account_id);
         expectingPong.delete(account_id);
-        hasPingCycleStarted.delete(account_id);
         continue;
       }
     }
 
     if (!expectingPong.get(account_id)) {
-      // ✅ Chỉ gửi ping nếu chưa có vòng ping đang chờ
       ws.isAlive = false;
       expectingPong.set(account_id, true);
       try {
