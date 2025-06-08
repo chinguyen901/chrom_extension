@@ -126,11 +126,12 @@ wss.on('connection', (ws) => {
           if (account_id && shouldPing(account_id)) {
             if (expectingPong.get(account_id)) {
               ws.isAlive = true;
-              ws.lastSeen = new Date();
-              const count = inactivityCounters.get(account_id) || 0;
-              if (count > 0) logDistraction(account_id, 'ACTIVE', 0);
-              inactivityCounters.set(account_id, 0);
               expectingPong.set(account_id, false);
+              const count = inactivityCounters.get(account_id) || 0;
+              if (count > 0) {
+                logDistraction(account_id, 'ACTIVE', 0);
+              }
+              inactivityCounters.set(account_id, 0);
             }
           }
           break;
@@ -193,13 +194,16 @@ setInterval(() => {
       }
     }
 
-    ws.isAlive = false;
-    hasPinged.set(account_id, true);
-    expectingPong.set(account_id, true);
-    hasPingCycleStarted.set(account_id, true); // ✅ đánh dấu bắt đầu chu kỳ ping
-    try {
-      ws.send(JSON.stringify({ type: 'ping' }));
-    } catch {}
+    if (!expectingPong.get(account_id)) {
+      // ✅ Chỉ gửi ping nếu chưa có vòng ping đang chờ
+      ws.isAlive = false;
+      expectingPong.set(account_id, true);
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (e) {
+        console.error(`❌ Failed to send ping to ${account_id}:`, e.message);
+      }
+    }
   }
 }, 10000);
 
