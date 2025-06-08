@@ -1,5 +1,3 @@
-// ✅ index.js (phiên bản tối ưu đã fix lỗi "NO ACTIVE" và log đúng ACTIVE)
-
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
@@ -142,7 +140,7 @@ wss.on('connection', (ws) => {
 
             if (expectingPong.get(account_id)) {
               if (responseDelay >= 500 && responseDelay <= 11000) {
-                logDistraction(account_id, 'ACTIVE', 0);
+                // Client phản hồi pong trong khoảng thời gian hợp lý (500ms - 11s)
                 inactivityCounters.set(account_id, 0);
               }
               expectingPong.set(account_id, false);
@@ -187,40 +185,10 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    const inactiveFor = now - (ws.lastSeen?.getTime?.() || now);
-
-    if (expectingPong.get(account_id)) {
-      if (!ws.isAlive || inactiveFor > 10000) {
-        let count = inactivityCounters.get(account_id) || 0;
-        count++;
-        inactivityCounters.set(account_id, count);
-        logDistraction(account_id, 'NO ACTIVE ON TAB', count);
-
-        if (count >= 30) {
-          console.warn(`⚠️ No pong from ${account_id} for 5 minutes. Logging SUDDEN.`);
-          pool.query(
-            `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
-            [account_id, 'SUDDEN', 'Client inactive > 5min', new Date()]
-          );
-          try {
-            ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
-          } catch (e) {
-            console.error("❌ Failed to send force-checkin to client:", e.message);
-          }
-
-          ws.terminate();
-          clients.delete(account_id);
-          inactivityCounters.delete(account_id);
-          checkinStatus.delete(account_id);
-          hasPinged.delete(account_id);
-          expectingPong.delete(account_id);
-          lastPingSentAt.delete(account_id);
-          continue;
-        }
-      }
-    }
-
+    // Đánh dấu thời gian gửi ping
     lastPingSentAt.set(account_id, now);
+
+    // Gửi ping cho client
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
@@ -231,15 +199,48 @@ setInterval(() => {
       console.error("❌ Failed to send ping to", account_id);
     }
   }
-}, 10000);
+}, 30000); // Gửi ping mỗi 30 giây
 
-function logDistraction(account_id, status, note = 0) {
-  const timestamp = new Date();
-  pool.query(
-    `INSERT INTO distraction_sessions (account_id, status, note, created_at) VALUES ($1, $2, $3, $4)`,
-    [account_id, status, note, timestamp]
-  ).catch(err => console.error("❌ Failed to log distraction:", err));
-}
+// Kiểm tra mỗi 30 giây nếu không nhận được pong
+setInterval(() => {
+  const now = Date.now();
+
+  for (const [account_id, ws] of clients.entries()) {
+    if (!shouldPing(account_id)) continue;
+    if (ws.readyState !== ws.OPEN) continue;
+
+    const lastPingSent = lastPingSentAt.get(account_id);
+    const inactiveFor = now - lastPingSent;
+
+    if (expectingPong.get(account_id)) {
+      if (inactiveFor > 30000) { // 30 giây không nhận được pong từ client
+        // Ghi log SUDDEN
+        console.warn(`⚠️ No pong from ${account_id} for 30 seconds. Logging SUDDEN.`);
+
+        pool.query(
+          `INSERT INTO incident_sessions (account_id, status, reason, created_at) VALUES ($1, $2, $3, $4)`,
+          [account_id, 'SUDDEN', 'Client inactive > 30s', new Date()]
+        );
+
+        try {
+          ws.send(JSON.stringify({ type: 'force-checkin', message: 'SUDDEN - Please check in again to work' }));
+        } catch (e) {
+          console.error("❌ Failed to send force-checkin to client:", e.message);
+        }
+
+        ws.terminate(); // Ngắt kết nối WebSocket
+        clients.delete(account_id);
+        inactivityCounters.delete(account_id);
+        checkinStatus.delete(account_id);
+        hasPinged.delete(account_id);
+        expectingPong.delete(account_id);
+        lastPingSentAt.delete(account_id);
+        continue;
+      }
+    }
+  }
+}, 10000); // Kiểm tra mỗi 10 giây nếu pong đã đến sau 30 giây
+
 
 setInterval(() => {
   fetch('https://chromextension-production.up.railway.app')
