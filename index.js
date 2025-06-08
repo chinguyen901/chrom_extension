@@ -1,4 +1,4 @@
-// ✅ index.js (final fix – NO ACTIVE tăng đều, không log sớm)
+// ✅ index.js (final fix – NO ACTIVE tăng đều, không log sớm, ACTIVE log đúng)
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -12,6 +12,7 @@ const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
 const expectingPong = new Map();
+const hasPingCycleStarted = new Map(); // ✅ mới thêm
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -69,6 +70,7 @@ wss.on('connection', (ws) => {
             checkinStatus.set(account_id, true);
             hasPinged.set(account_id, false);
             expectingPong.set(account_id, false);
+            hasPingCycleStarted.set(account_id, false); // ✅ reset chu kỳ ping
           }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
@@ -150,6 +152,7 @@ wss.on('connection', (ws) => {
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
       expectingPong.delete(ws.account_id);
+      hasPingCycleStarted.delete(ws.account_id);
     }
   });
 });
@@ -164,7 +167,7 @@ setInterval(() => {
     if (!shouldPing(account_id)) continue;
     if (ws.readyState !== ws.OPEN) continue;
 
-    if (expectingPong.get(account_id) && ws.isAlive === false) {
+    if (hasPingCycleStarted.get(account_id) && expectingPong.get(account_id) && ws.isAlive === false) {
       let count = inactivityCounters.get(account_id) || 0;
       count++;
       inactivityCounters.set(account_id, count);
@@ -185,6 +188,7 @@ setInterval(() => {
         checkinStatus.delete(account_id);
         hasPinged.delete(account_id);
         expectingPong.delete(account_id);
+        hasPingCycleStarted.delete(account_id);
         continue;
       }
     }
@@ -192,6 +196,7 @@ setInterval(() => {
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
+    hasPingCycleStarted.set(account_id, true); // ✅ đánh dấu bắt đầu chu kỳ ping
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch {}
