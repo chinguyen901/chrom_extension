@@ -12,6 +12,8 @@ const inactivityCounters = new Map();
 const checkinStatus = new Map();
 const hasPinged = new Map();
 const expectingPong = new Map();
+const lastPingSentAt = new Map();
+
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -135,16 +137,23 @@ wss.on('connection', (ws) => {
 
         case 'pong': {
           if (account_id && shouldPing(account_id)) {
-            if (expectingPong.get(account_id)) {
+            const sentAt = lastPingSentAt.get(account_id) || 0;
+            const now = Date.now();
+            const responseDelay = now - sentAt;
+        
+            if (expectingPong.get(account_id) && responseDelay >= 500 && responseDelay <= 11000) {
+              // ✅ chỉ reset count nếu phản hồi đúng thời điểm
               logDistraction(account_id, 'ACTIVE', 0);
-              inactivityCounters.set(account_id, 0); // ✅ chỉ reset khi đang chờ pong
-              expectingPong.set(account_id, false);  // ✅ tắt cờ
+              inactivityCounters.set(account_id, 0);
+              expectingPong.set(account_id, false);
             }
+        
             ws.isAlive = true;
             ws.lastSeen = new Date();
           }
           break;
         }
+
 
         default:
           ws.send(JSON.stringify({ success: false, error: "Unknown message type" }));
@@ -213,6 +222,7 @@ setInterval(() => {
     }
 
     // ✅ Gửi ping mới
+    lastPingSentAt.set(account_id, Date.now());
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
