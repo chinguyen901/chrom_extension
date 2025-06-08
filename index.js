@@ -88,6 +88,10 @@ wss.on('connection', (ws) => {
             // Khi nhận thông tin break-done từ client, đặt flagBreak = false và gửi ping lại
             flagBreak.set(account_id, false);
             ws.isAlive = true;
+                // Đảm bảo các trạng thái liên quan đến ping-pong cũng được xử lý đúng
+            expectingPong.set(account_id, false); // Không còn chờ pong nữa sau khi break xong
+            hasPinged.set(account_id, false);     // Reset trạng thái ping
+            inactivityCounters.set(account_id, 0);
           }  // Đặt isAlive về true để tiếp tục gửi ping cho client        
           await pool.query(
             `INSERT INTO break_sessions (account_id, status, created_at) VALUES ($1, $2, $3)`,
