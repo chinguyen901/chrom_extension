@@ -163,6 +163,7 @@ wss.on('connection', (ws) => {
       inactivityCounters.delete(ws.account_id);
       checkinStatus.delete(ws.account_id);
       hasPinged.delete(ws.account_id);
+      expectingPong.delete(ws.account_id);
     }
   });
 });
@@ -180,7 +181,8 @@ setInterval(() => {
 
     const inactiveFor = now - (ws.lastSeen || now);
 
-    if (hasPinged.get(account_id)) {
+    // ✅ Nếu đang chờ pong mà chưa nhận được phản hồi
+    if (expectingPong.get(account_id)) {
       if (!ws.isAlive || inactiveFor > 10000) {
         let count = inactivityCounters.get(account_id) || 0;
         count++;
@@ -204,11 +206,13 @@ setInterval(() => {
           inactivityCounters.delete(account_id);
           checkinStatus.delete(account_id);
           hasPinged.delete(account_id);
+          expectingPong.delete(account_id);
           continue;
         }
       }
     }
 
+    // ✅ Gửi ping mới
     ws.isAlive = false;
     hasPinged.set(account_id, true);
     expectingPong.set(account_id, true);
@@ -220,6 +224,7 @@ setInterval(() => {
     }
   }
 }, 10000);
+
 
 function logDistraction(account_id, status, note = 0) {
   const timestamp = new Date();
