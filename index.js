@@ -42,7 +42,7 @@ async function handleSudden(account_id, ws = null) {
       expectingPong.set(account_id, false);
       hasPinged.set(account_id, false);
       checkinStatus.set(account_id, false);
-
+      
       // Báo cho extension về kết nối mất ổn định
       if (ws && ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({
@@ -237,8 +237,10 @@ wss.on('connection', (ws) => {
     console.log('🚪 Client disconnected.');
 
     // Kiểm tra và chỉ gọi handleSudden khi trạng thái checkinStatus là true
-    if (ws.account_id && checkinStatus.get(ws.account_id)) {
-      handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client bị mất kết nối
+    if (ws.account_id && checkinStatus.get(ws.account_id) && !expectingPong.get(ws.account_id)) {
+      if (!hasPinged.get(ws.account_id)) {
+        handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client thực sự mất kết nối
+      }
     }
 
     // Dọn dẹp map
@@ -259,17 +261,55 @@ setInterval(() => {
     if (ws.readyState !== ws.OPEN) continue;
     if (!shouldPing(account_id)) continue;
 
-    if (!ws.isAlive) {
-      handleSudden(account_id, ws); // client không phản hồi pong
-      continue;
+    // Kiểm tra nếu đang chờ pong và không nhận được phản hồi trong thời gian timeout
+    if (expectingPong.get(account_id)) {
+      const lastPing = lastPingSentAt.get(account_id) || 0;
+      if (Date.now() - lastPing > PONG_TIMEOUT) {
+        console.log(`[PING] Timeout for ${account_id}, logging sudden...`);
+        handleSudden(account_id, ws);  // Ghi log sudden khi mất kết nối hoặc timeout
+      }
+      continue; // Nếu vẫn đang chờ pong, tiếp tục
     }
 
-    ws.isAlive = false;
-    lastPingSentAt.set(account_id, Date.now());
-    ws.ping();
+    // Chỉ gửi ping nếu checkinStatus đã được cập nhật (client đã check-in)
+    if (checkinStatus.get(account_id)) {
+      // Thêm một khoảng delay sau check-in trước khi gửi ping
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        expectingPong.set(account_id, true);
+        lastPingSentAt.set(account_id, Date.now());
+      }, 500); // 500ms delay
+    }
   }
 }, PING_INTERVAL);
 
-server.listen(process.env.PORT || 8080, () => {
-  console.log("✅ WebSocket server is running.");
+
+// ────────────────────────────────────────────────────────────────────────────
+// SELF-PING (giữ Railway không ngủ)
+// ────────────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  fetch('https://chromextension-production.up.railway.app')
+    .then(() => console.log('🔄 Self-ping success at', new Date().toISOString()))
+    .catch(err => console.error('❌ Self-ping error:', err.message));
+}, 5_000);  // 60 s là đủ
+
+// ────────────────────────────────────────────────────────────────────────────
+// START SERVER
+// ────────────────────────────────────────────────────────────────────────────
+createTables().then(() => {
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () =>
+    console.log(`✅ WebSocket server running on ws://localhost:${PORT}`));
+}).catch(err => {
+  console.error('❌ Failed to create tables:', err);
+  process.exit(1);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+process.on('SIGTERM', () => {
+  console.log('Application is shutting down…');
+  pool.end(() => {
+    console.log('Database connection closed');
+    process.exit(0);
+  });
 });
