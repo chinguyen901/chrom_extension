@@ -259,27 +259,32 @@ setInterval(() => {
     if (ws.readyState !== ws.OPEN) continue;
     if (!shouldPing(account_id)) continue;
 
+    // Gửi ping mà không kiểm tra checkTabActive
+    if (checkinStatus.get(account_id)) {
+      ws.send(JSON.stringify({ type: 'ping' }));
+      expectingPong.set(account_id, true);
+      lastPingSentAt.set(account_id, Date.now());
+    }
+  }
+}, PING_INTERVAL);
+
+// Kiểm tra và gửi log sudden nếu không nhận được pong trong thời gian timeout
+setInterval(() => {
+  for (const [account_id, ws] of clients.entries()) {
+    if (ws.readyState !== ws.OPEN) continue;
+
     // Kiểm tra nếu đang chờ pong và không nhận được phản hồi trong thời gian timeout
     if (expectingPong.get(account_id)) {
       const lastPing = lastPingSentAt.get(account_id) || 0;
       if (Date.now() - lastPing > PONG_TIMEOUT) {
         console.log(`[PING] Timeout for ${account_id}, logging sudden...`);
-        handleSudden(account_id, ws);  // Ghi log sudden khi mất kết nối hoặc timeout
+        handleSudden(account_id, ws);  // Ghi log sudden nếu không nhận được pong hợp lệ
       }
-      continue; // Nếu vẫn đang chờ pong, tiếp tục
-    }
-
-    // Chỉ gửi ping nếu checkinStatus đã được cập nhật (client đã check-in)
-    if (checkinStatus.get(account_id)) {
-      // Thêm một khoảng delay sau check-in trước khi gửi ping
-      setTimeout(() => {
-        ws.send(JSON.stringify({ type: 'ping' }));
-        expectingPong.set(account_id, true);
-        lastPingSentAt.set(account_id, Date.now());
-      }, 500); // 500ms delay
+      continue; // Nếu vẫn đang chờ pong, tiếp tục gửi ping
     }
   }
-}, PING_INTERVAL);
+}, PONG_TIMEOUT); // Kiểm tra timeout để gửi log sudden nếu không nhận được pong
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // SELF-PING (giữ Railway không ngủ)
