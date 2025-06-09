@@ -19,8 +19,8 @@ const lastPingSentAt   = new Map();
 // ────────────────────────────────────────────────────────────────────────────
 // PING / PONG CONFIG
 // ────────────────────────────────────────────────────────────────────────────
-const PING_INTERVAL = 30_000;  // 30 s
-const PONG_TIMEOUT  = 10_000;  // 10 s chờ phản hồi
+const PING_INTERVAL = 5_000;  // 30 s
+const PONG_TIMEOUT  = 5_000;  // 10 s chờ phản hồi
 
 function shouldPing(account_id) {
   return checkinStatus.get(account_id) === true;
