@@ -19,8 +19,8 @@ const lastPingSentAt   = new Map();
 // ────────────────────────────────────────────────────────────────────────────
 // PING / PONG CONFIG
 // ────────────────────────────────────────────────────────────────────────────
-const PING_INTERVAL = 5_000;  // 30 s
-const PONG_TIMEOUT  = 5_000;  // 10 s chờ phản hồi
+const PING_INTERVAL = 5_000;  // 5 s
+const PONG_TIMEOUT  = 5_000;  // 5 s chờ phản hồi
 
 function shouldPing(account_id) {
   return checkinStatus.get(account_id) === true;
@@ -113,6 +113,11 @@ wss.on('connection', (ws) => {
           );
           if (result.rows.length) {
             ws.send(JSON.stringify({ success: true, ...result.rows[0] }));
+            
+            // Bắt đầu ping ngay sau khi login thành công
+            checkinStatus.set(result.rows[0].id, true);  // Bắt đầu theo dõi kết nối ngay sau login
+            hasPinged.set(result.rows[0].id, false);
+            ws.isAlive = true;
           } else {
             ws.send(JSON.stringify({ success: false, error: 'Username hoặc mật khẩu không đúng' }));
           }
@@ -230,16 +235,20 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('🚪 Client disconnected.');
+
+    // Kiểm tra và chỉ gọi handleSudden khi trạng thái checkinStatus là true
     if (ws.account_id && checkinStatus.get(ws.account_id)) {
-      handleSudden(ws.account_id);   // ws đã đóng nên không gửi notify  
+      handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client bị mất kết nối
     }
+
+    // Dọn dẹp map
     if (ws.account_id) {
-      clients         .delete(ws.account_id);
+      clients.delete(ws.account_id);
       inactivityCounters.delete(ws.account_id);
-      checkinStatus   .delete(ws.account_id);
-      hasPinged       .delete(ws.account_id);
-      expectingPong   .delete(ws.account_id);
-      lastPingSentAt  .delete(ws.account_id);
+      checkinStatus.delete(ws.account_id);
+      hasPinged.delete(ws.account_id);
+      expectingPong.delete(ws.account_id);
+      lastPingSentAt.delete(ws.account_id);
     }
   });
 });
@@ -250,16 +259,17 @@ setInterval(() => {
     if (ws.readyState !== ws.OPEN) continue;
     if (!shouldPing(account_id))   continue;
 
-    // Nếu đã ping mà chưa nhận pong trong 10 s  → sudden
+    // Kiểm tra nếu đang chờ pong và không nhận được phản hồi trong thời gian timeout
     if (expectingPong.get(account_id)) {
       const lastPing = lastPingSentAt.get(account_id) || 0;
-      if (Date.now() - (lastPingSentAt.get(account_id) || 0) > PONG_TIMEOUT) {
-        handleSudden(account_id, ws);
+      if (Date.now() - lastPing > PONG_TIMEOUT) {
+        console.log(`[PING] Timeout for ${account_id}, logging sudden...`);
+        handleSudden(account_id, ws);  // Ghi log sudden khi mất kết nối hoặc timeout
       }
-      continue; // vẫn đang chờ pong
+      continue; // Nếu vẫn đang chờ pong, tiếp tục
     }
 
-    // Gửi ping mới
+    // Gửi ping
     ws.send(JSON.stringify({ type: 'ping' }));
     expectingPong.set(account_id, true);
     lastPingSentAt.set(account_id, Date.now());
@@ -281,8 +291,7 @@ setInterval(() => {
 createTables().then(() => {
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () =>
-    console.log(`✅ WebSocket server running on ws://localhost:${PORT}`)
-  );
+    console.log(`✅ WebSocket server running on ws://localhost:${PORT}`));
 }).catch(err => {
   console.error('❌ Failed to create tables:', err);
   process.exit(1);
