@@ -28,29 +28,32 @@ function shouldPing(account_id) {
 
 async function handleSudden(account_id, ws = null) {
   try {
-    // Ghi log sudden
-    await pool.query(
-      `INSERT INTO incident_sessions (account_id, status,reason, created_at)
-       VALUES ($1, 'SUDDEN','Client Disconect', $2)`,
-      [account_id, new Date()]
-    );
+    // Kiểm tra nếu là socket đã mở hoặc mất kết nối (có thể mạng bị mất, không nhận được pong)
+    if (ws && ws.readyState !== ws.OPEN) {
+      // Nếu socket đã đóng, ta mới ghi log sudden
+      await pool.query(
+        `INSERT INTO incident_sessions (account_id, status, reason, created_at)
+         VALUES ($1, 'SUDDEN', 'Client Disconnected', $2)`,
+        [account_id, new Date()]
+      );
 
-    // Reset trạng thái liên quan
-    inactivityCounters.set(account_id, 0);
-    expectingPong.set(account_id, false);
-    hasPinged.set(account_id, false);
-    checkinStatus.set(account_id, false);
-
-    // Báo cho extension
-    if (ws && ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({
-        type   : 'sudden',
-        status : 'checkin-required',
-        message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
-      }));
+      // Reset trạng thái liên quan
+      inactivityCounters.set(account_id, 0);
+      expectingPong.set(account_id, false);
+      hasPinged.set(account_id, false);
+      checkinStatus.set(account_id, false);
+      
+      // Báo cho extension về kết nối mất ổn định
+      if (ws && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type   : 'sudden',
+          status : 'checkin-required',
+          message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
+        }));
+      }
     }
   } catch (err) {
-    console.error('❌ handleSudden error:', err);
+    console.error('❌ Error in handleSudden:', err);
   }
 }
 
@@ -250,6 +253,7 @@ setInterval(() => {
 
     // Nếu đã ping mà chưa nhận pong trong 10 s  → sudden
     if (expectingPong.get(account_id)) {
+      const lastPing = lastPingSentAt.get(account_id) || 0;
       if (Date.now() - (lastPingSentAt.get(account_id) || 0) > PONG_TIMEOUT) {
         handleSudden(account_id, ws);
       }
