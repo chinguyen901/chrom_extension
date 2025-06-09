@@ -270,9 +270,11 @@ setInterval(() => {
     }
 
     // Gửi ping
-    ws.send(JSON.stringify({ type: 'ping' }));
-    expectingPong.set(account_id, true);
-    lastPingSentAt.set(account_id, Date.now());
+    if (checkinStatus.get(account_id)) {
+      ws.send(JSON.stringify({ type: 'ping' }));
+      expectingPong.set(account_id, true);
+      lastPingSentAt.set(account_id, Date.now());
+    }
   }
 }, PING_INTERVAL);
 
