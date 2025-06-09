@@ -113,7 +113,6 @@ wss.on('connection', (ws) => {
           );
           if (result.rows.length) {
             ws.send(JSON.stringify({ success: true, ...result.rows[0] }));
-            checkinStatus.set(result.rows[0].id, true);
           } else {
             ws.send(JSON.stringify({ success: false, error: 'Username hoặc mật khẩu không đúng' }));
           }
