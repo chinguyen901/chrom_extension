@@ -26,7 +26,7 @@ function shouldPing(account_id) {
   return checkinStatus.get(account_id) === true;
 }
 
-async function handleSudden(account_id, ws) {
+async function handleSudden(account_id, ws = null) {
   try {
     // Ghi log sudden
     await pool.query(
@@ -42,7 +42,7 @@ async function handleSudden(account_id, ws) {
     checkinStatus.set(account_id, false);
 
     // Báo cho extension
-    if (ws.readyState === ws.OPEN) {
+    if (ws && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({
         type   : 'sudden',
         status : 'checkin-required',
@@ -228,6 +228,9 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('🚪 Client disconnected.');
+    if (ws.account_id && checkinStatus.get(ws.account_id)) {
+      handleSudden(ws.account_id);   // ws đã đóng nên không gửi notify  
+    }
     if (ws.account_id) {
       clients         .delete(ws.account_id);
       inactivityCounters.delete(ws.account_id);
