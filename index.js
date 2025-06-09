@@ -267,7 +267,7 @@ setInterval(() => {
   fetch('https://chromextension-production.up.railway.app')
     .then(() => console.log('🔄 Self-ping success at', new Date().toISOString()))
     .catch(err => console.error('❌ Self-ping error:', err.message));
-}, 60_000);  // 60 s là đủ
+}, 5_000);  // 60 s là đủ
 
 // ────────────────────────────────────────────────────────────────────────────
 // START SERVER
