@@ -113,6 +113,7 @@ wss.on('connection', (ws) => {
           );
           if (result.rows.length) {
             ws.send(JSON.stringify({ success: true, ...result.rows[0] }));
+            checkinStatus.set(result.rows[0].id, true);
           } else {
             ws.send(JSON.stringify({ success: false, error: 'Username hoặc mật khẩu không đúng' }));
           }
@@ -131,7 +132,6 @@ wss.on('connection', (ws) => {
             checkinStatus.set(account_id, true);
             hasPinged      .set(account_id, false);
             ws.isAlive = true;
-            checkinStatus.set(result.rows[0].id, true);
           }
           ws.send(JSON.stringify({ success: true, type: status }));
           break;
