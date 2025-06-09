@@ -237,9 +237,9 @@ wss.on('connection', (ws) => {
     console.log('🚪 Client disconnected.');
 
     // Kiểm tra và chỉ gọi handleSudden khi trạng thái checkinStatus là true
-    if (ws.account_id && checkinStatus.get(ws.account_id)) {
-      handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client bị mất kết nối
-    }
+    // if (ws.account_id && checkinStatus.get(ws.account_id)) {
+    //   handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client bị mất kết nối
+    // }
 
     // Dọn dẹp map
     if (ws.account_id) {
