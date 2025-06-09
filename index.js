@@ -257,7 +257,7 @@ wss.on('connection', (ws) => {
 setInterval(() => {
   for (const [account_id, ws] of clients.entries()) {
     if (ws.readyState !== ws.OPEN) continue;
-    if (!shouldPing(account_id))   continue;
+    if (!shouldPing(account_id)) continue;
 
     // Kiểm tra nếu đang chờ pong và không nhận được phản hồi trong thời gian timeout
     if (expectingPong.get(account_id)) {
@@ -269,11 +269,14 @@ setInterval(() => {
       continue; // Nếu vẫn đang chờ pong, tiếp tục
     }
 
-    // Gửi ping
+    // Chỉ gửi ping nếu checkinStatus đã được cập nhật (client đã check-in)
     if (checkinStatus.get(account_id)) {
-      ws.send(JSON.stringify({ type: 'ping' }));
-      expectingPong.set(account_id, true);
-      lastPingSentAt.set(account_id, Date.now());
+      // Thêm một khoảng delay sau check-in trước khi gửi ping
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        expectingPong.set(account_id, true);
+        lastPingSentAt.set(account_id, Date.now());
+      }, 500); // 500ms delay
     }
   }
 }, PING_INTERVAL);
