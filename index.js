@@ -268,7 +268,11 @@ setInterval(() => {
       if (Date.now() - lastPing > PONG_TIMEOUT) {
         if (graceCount >= 1) {
           console.log(`[PING] Timeout confirmed, closing socket for ${account_id}`);
-          ws.close(); // để trigger ws.on('close') → handleSudden
+          handleSudden(account_id, ws);
+          // Nếu cần vẫn đóng socket để đảm bảo clean-up
+          if (ws.readyState === ws.OPEN) {
+            try { ws.terminate?.(); } catch (e) {}
+          }
         } else {
           inactivityCounters.set(account_id, graceCount + 1);
         }
