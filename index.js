@@ -19,8 +19,8 @@ const lastPingSentAt   = new Map();
 // ────────────────────────────────────────────────────────────────────────────
 // PING / PONG CONFIG
 // ────────────────────────────────────────────────────────────────────────────
-const PING_INTERVAL = 30_000;  // 30 s
-const PONG_TIMEOUT  = 5_000;  // 5 s chờ phản hồi
+const PING_INTERVAL = 15_000;  // 15 s
+const PONG_TIMEOUT  = 10_000;  // 10 s chờ phản hồi
 
 function shouldPing(account_id) {
   return checkinStatus.get(account_id) === true;
@@ -235,23 +235,23 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('🚪 Client disconnected.');
-
-    // Kiểm tra và chỉ gọi handleSudden khi trạng thái checkinStatus là true
-    if (ws.account_id && checkinStatus.get(ws.account_id) && !expectingPong.get(ws.account_id)) {
-      if (!hasPinged.get(ws.account_id)) {
-        handleSudden(ws.account_id, ws);   // Ghi log sudden nếu client thực sự mất kết nối
-      }
+  
+    const id = ws.account_id;
+    const isCheckin = checkinStatus.get(id);
+    const hasAnyPing = hasPinged.get(id);
+  
+    // CHỈ ghi sudden nếu: đang check-in + đã từng ping + socket bị đóng đột ngột
+    if (id && isCheckin && hasAnyPing) {
+      handleSudden(id, ws);
     }
-
-    // Dọn dẹp map
-    if (ws.account_id) {
-      clients.delete(ws.account_id);
-      inactivityCounters.delete(ws.account_id);
-      checkinStatus.delete(ws.account_id);
-      hasPinged.delete(ws.account_id);
-      expectingPong.delete(ws.account_id);
-      lastPingSentAt.delete(ws.account_id);
-    }
+  
+    // Clean up
+    clients.delete(id);
+    inactivityCounters.delete(id);
+    checkinStatus.delete(id);
+    hasPinged.delete(id);
+    expectingPong.delete(id);
+    lastPingSentAt.delete(id);
   });
 });
 
@@ -261,24 +261,28 @@ setInterval(() => {
     if (ws.readyState !== ws.OPEN) continue;
     if (!shouldPing(account_id)) continue;
 
-    // Kiểm tra nếu đang chờ pong và không nhận được phản hồi trong thời gian timeout
+    const graceCount = inactivityCounters.get(account_id) || 0;
+
     if (expectingPong.get(account_id)) {
       const lastPing = lastPingSentAt.get(account_id) || 0;
       if (Date.now() - lastPing > PONG_TIMEOUT) {
-        console.log(`[PING] Timeout for ${account_id}, logging sudden...`);
-        handleSudden(account_id, ws);  // Ghi log sudden khi mất kết nối hoặc timeout
+        if (graceCount >= 1) {
+          console.log(`[PING] Timeout confirmed, closing socket for ${account_id}`);
+          ws.close(); // để trigger ws.on('close') → handleSudden
+        } else {
+          inactivityCounters.set(account_id, graceCount + 1);
+        }
       }
-      continue; // Nếu vẫn đang chờ pong, tiếp tục
+      continue;
     }
 
-    // Chỉ gửi ping nếu checkinStatus đã được cập nhật (client đã check-in)
     if (checkinStatus.get(account_id)) {
-      // Thêm một khoảng delay sau check-in trước khi gửi ping
       setTimeout(() => {
         ws.send(JSON.stringify({ type: 'ping' }));
         expectingPong.set(account_id, true);
         lastPingSentAt.set(account_id, Date.now());
-      }, 500); // 500ms delay
+        hasPinged.set(account_id, true);
+      }, 500);
     }
   }
 }, PING_INTERVAL);
