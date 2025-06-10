@@ -114,10 +114,10 @@ wss.on('connection', (ws) => {
           if (result.rows.length) {
             ws.send(JSON.stringify({ success: true, ...result.rows[0] }));
             
-            // Bắt đầu ping ngay sau khi login thành công
-            checkinStatus.set(result.rows[0].id, true);  // Bắt đầu theo dõi kết nối ngay sau login
-            hasPinged.set(result.rows[0].id, false);
-            ws.isAlive = true;
+            // // Bắt đầu ping ngay sau khi login thành công
+            // checkinStatus.set(result.rows[0].id, true);  // Bắt đầu theo dõi kết nối ngay sau login
+            // hasPinged.set(result.rows[0].id, false);
+            // ws.isAlive = true;
           } else {
             ws.send(JSON.stringify({ success: false, error: 'Username hoặc mật khẩu không đúng' }));
           }
