@@ -242,6 +242,7 @@ wss.on('connection', (ws, req) => {
 
         // ---------------- PING / PONG ----------------
         case 'pong': {
+          console.log(`⏰ pong  account_id ${account_id}`);
           expectingPong.set(account_id, false);
           inactivityCounters.set(account_id, 0);
           hasPinged.set(account_id, true);
@@ -268,6 +269,7 @@ wss.on('connection', (ws, req) => {
 
   // ───────── PING TIMER ─────────
   const intervalId = setInterval(() => {
+    console.log(`⏰ Tien hanh gửi ping`);
     if (!ws.account_id) return; // Chưa xác định được account_id
 
     if (!shouldPing(ws.account_id)) {
