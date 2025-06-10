@@ -25,6 +25,7 @@ const checkinStatus      = new Map();   // account_id → boolean (đang check�
 const hasPinged          = new Map();   // account_id → boolean (đã có ít nhất 1 ping/pong)
 const expectingPong      = new Map();   // account_id → boolean (đang chờ pong)
 const lastPingSentAt     = new Map();   // account_id → timestamp
+const socketToAccountId = new Map();
 
 // ────────────────────────────────────────────────────────────────────────────
 // PING / PONG CONFIG
@@ -146,6 +147,7 @@ wss.on('connection', (ws, req) => {
       // Map socket ↔ account_id
       if (account_id) {
         ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
+        socketToAccountId.set(ws, account_id);
         setClient(account_id, ws.source, ws);
         inactivityCounters.set(account_id, 0);
       }
@@ -312,7 +314,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     console.log(`🚪 ${ws.source} socket disconnected.`);
 
-    let id = ws.account_id;
+    let id = ws.account_id || socketToAccountId.get(ws);
 
     // Nếu chưa có, tìm trong clients map
     if (!id) {
@@ -329,7 +331,7 @@ wss.on('connection', (ws, req) => {
       clearInterval(intervalId);
       return; // Không xử lý tiếp
     }
-
+    socketToAccountId.delete(ws);
     const isCheckin = checkinStatus.get(id);
 
     console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id}`);
