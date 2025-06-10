@@ -289,87 +289,84 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     console.log(`🚪 ${ws.source} socket disconnected.`);
 
-    const id         = ws.account_id;
+    // Fallback tìm account_id nếu ws.account_id undefined
+    let id = ws.account_id;
+    if (!id) {
+      for (const [acc_id, entry] of clients.entries()) {
+        if (entry[ws.source] === ws) {
+          id = acc_id;
+          break;
+        }
+      }
+    }
+
     const isCheckin  = checkinStatus.get(id);
     const hasAnyPing = hasPinged.get(id);
-    console.log(`🚪 ${ws.source} --- ${isCheckin} ---- ${id}.`);
+
+    console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id} | Pinged: ${hasAnyPing}`);
+
     // CHỈ ghi sudden nếu background rớt
     if (ws.source === 'background' && id && isCheckin) {
-      console.log(`🚪 ${ws.source} Vào if close.`);
+      console.log(`🚪 ${ws.source} ➜ Ghi log sudden.`);
       handleSudden(id, ws);
       checkinStatus.delete(id);
     }
 
-    removeClient(id, ws.source);
-    inactivityCounters.delete(id);
-    hasPinged.delete(id);
-    expectingPong.delete(id);
-    lastPingSentAt.delete(id);
+    if (id) {
+      removeClient(id, ws.source);
+      inactivityCounters.delete(id);
+      hasPinged.delete(id);
+      expectingPong.delete(id);
+      lastPingSentAt.delete(id);
+    }
+  });
+
+  // ───────── ERROR HANDLER ─────────
+  ws.on('error', (err) => {
+    console.error(`❌ WebSocket error (${ws.source}):`, err);
   });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// GLOBAL PING LOOP (chỉ ping background)
+// PING INTERVAL
 // ────────────────────────────────────────────────────────────────────────────
 setInterval(() => {
   for (const [account_id, entry] of clients.entries()) {
     const ws = entry.background;
     if (!ws || ws.readyState !== ws.OPEN) continue;
-    if (!shouldPing(account_id))           continue;
-
-    const graceCount = inactivityCounters.get(account_id) || 0;
+    if (!shouldPing(account_id)) continue;
 
     if (expectingPong.get(account_id)) {
-      const lastPing = lastPingSentAt.get(account_id) || 0;
-      if (Date.now() - lastPing > PONG_TIMEOUT) {
-        if (graceCount >= 2) {
-          console.log(`[PING] Timeout confirmed, closing socket for ${account_id}`);
-          handleSudden(account_id, ws);
-          try { ws.terminate?.(); } catch (_) {}
-        } else {
-          inactivityCounters.set(account_id, graceCount + 1);
-        }
-      }
-      continue;
-    }
+      // Nếu đã chờ pong mà chưa nhận được
+      let counter = inactivityCounters.get(account_id) || 0;
+      counter++;
+      inactivityCounters.set(account_id, counter);
 
-    setTimeout(() => {
-      if (ws.readyState === ws.OPEN) {
+      console.log(`⏰ No PONG from ${account_id}, attempt #${counter}`);
+
+      if (counter >= 3) {
+        console.log(`⏰ 3 lần không phản hồi, xử lý sudden cho ${account_id}`);
+        handleSudden(account_id, ws);
+        inactivityCounters.set(account_id, 0);
+        expectingPong.set(account_id, false);
+      }
+    } else {
+      try {
         ws.send(JSON.stringify({ type: 'ping' }));
         expectingPong.set(account_id, true);
         lastPingSentAt.set(account_id, Date.now());
-        hasPinged.set(account_id, true);
+        console.log(`✅ Sent PING to ${account_id}`);
+      } catch (err) {
+        console.error(`❌ Error sending ping to ${account_id}:`, err);
       }
-    }, 500);
+    }
   }
 }, PING_INTERVAL);
 
 // ────────────────────────────────────────────────────────────────────────────
-// SELF-PING (giữ Railway không ngủ)
-// ────────────────────────────────────────────────────────────────────────────
-setInterval(() => {
-  fetch('https://chromextension-production.up.railway.app')
-    .then(() => console.log('🔄 Self-ping success at', new Date().toISOString()))
-    .catch(err => console.error('❌ Self-ping error:', err.message));
-}, 60_000); // 60 s
-
-// ────────────────────────────────────────────────────────────────────────────
 // START SERVER
 // ────────────────────────────────────────────────────────────────────────────
-createTables().then(() => {
-  const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () =>
-    console.log(`✅ WebSocket server running on ws://localhost:${PORT}`));
-}).catch(err => {
-  console.error('❌ Failed to create tables:', err);
-  process.exit(1);
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-process.on('SIGTERM', () => {
-  console.log('Application is shutting down…');
-  pool.end(() => {
-    console.log('Database connection closed');
-    process.exit(0);
-  });
+const PORT = process.env.PORT || 3456;
+server.listen(PORT, () => {
+  console.log(`🚀 Server started on port ${PORT}`);
 });
