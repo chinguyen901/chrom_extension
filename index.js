@@ -285,7 +285,7 @@ wss.on('connection', (ws, req) => {
     const hasAnyPing = hasPinged.get(id);
 
     // CHỈ ghi sudden nếu background rớt
-    if (ws.source === 'background' && id && isCheckin && hasAnyPing) {
+    if (ws.source === 'background' && id && isCheckin) {
       handleSudden(id, ws);
     }
 
