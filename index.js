@@ -290,20 +290,14 @@ wss.on('connection', (ws, req) => {
     if (ws.source === 'background' && id && isCheckin) {
       console.log(`🚪 ${ws.source} Vào if close.`);
       handleSudden(id, ws);
-      removeClient(id, ws.source);
-      inactivityCounters.delete(id);
       checkinStatus.delete(id);
-      hasPinged.delete(id);
-      expectingPong.delete(id);
-      lastPingSentAt.delete(id);
     }
 
-    // removeClient(id, ws.source);
-    // inactivityCounters.delete(id);
-    // checkinStatus.delete(id);
-    // hasPinged.delete(id);
-    // expectingPong.delete(id);
-    // lastPingSentAt.delete(id);
+    removeClient(id, ws.source);
+    inactivityCounters.delete(id);
+    hasPinged.delete(id);
+    expectingPong.delete(id);
+    lastPingSentAt.delete(id);
   });
 });
 
