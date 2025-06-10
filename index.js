@@ -171,6 +171,7 @@ wss.on('connection', (ws, req) => {
 
           if (status === 'checkin') {
             checkinStatus.set(account_id, true);
+            console.log(`✅ line 174 : ${checkinStatus.set(account_id, true)}`);
             hasPinged.set(account_id, false);
 
             const bgSocket = getPreferredSocket(account_id);
