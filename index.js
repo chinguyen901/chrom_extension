@@ -178,7 +178,6 @@ wss.on('connection', (ws, req) => {
 
           if (status === 'checkin') {
             checkinStatus.set(account_id, true);
-            console.log(`✅ line 174 : ${checkinStatus.set(account_id, true)}`);
             hasPinged.set(account_id, false);
 
             const bgSocket = getPreferredSocket(account_id);
@@ -227,7 +226,23 @@ wss.on('connection', (ws, req) => {
              VALUES ($1, $2, $3)`,
             [account_id, status, created_at || new Date()]
           );
-          if (status === 'checkout') checkinStatus.set(account_id, false);
+          if (status === 'checkout') {
+            checkinStatus.set(account_id, false);
+
+            // Xóa các trạng thái liên quan khi checkout
+            inactivityCounters.delete(account_id);
+            hasPinged.delete(account_id);
+            expectingPong.delete(account_id);
+            lastPingSentAt.delete(account_id);
+
+            // Nếu có kết nối background thì đóng socket này để ngăn ghi sudden (hoặc đánh dấu lý do disconnect)
+            const clientEntry = clients.get(account_id);
+            if (clientEntry?.background) {
+              // Đánh dấu flag để không ghi sudden khi đóng socket
+              clientEntry.background.isCheckout = true;
+              clientEntry.background.close();
+            }
+          }
           ws.send(JSON.stringify({ success: true, type: 'log-loginout', status }));
           break;
         }
@@ -277,11 +292,12 @@ wss.on('connection', (ws, req) => {
 
         // ---------------- DEFAULT ----------------
         default:
-          ws.send(JSON.stringify({ success: false, error: 'Unknown message type' }));
+          ws.send(JSON.stringify({ success: false, error: `Unknown message type: ${type}` }));
+          break;
       }
     } catch (err) {
       console.error('❌ Error processing message:', err);
-      ws.send(JSON.stringify({ success: false, error: err.message }));
+      ws.send(JSON.stringify({ success: false, error: 'Internal server error' }));
     }
   });
 
@@ -289,7 +305,6 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     console.log(`🚪 ${ws.source} socket disconnected.`);
 
-    // Fallback tìm account_id nếu ws.account_id undefined
     let id = ws.account_id;
     if (!id) {
       for (const [acc_id, entry] of clients.entries()) {
@@ -301,12 +316,16 @@ wss.on('connection', (ws, req) => {
     }
 
     const isCheckin  = checkinStatus.get(id);
-    const hasAnyPing = hasPinged.get(id);
 
-    console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id} | Pinged: ${hasAnyPing}`);
+    console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id}`);
 
-    // CHỈ ghi sudden nếu background rớt
-    if (ws.source === 'background' && id && isCheckin) {
+    // CHỈ ghi sudden nếu background rớt và không phải do checkout (isCheckout false hoặc undefined)
+    if (
+      ws.source === 'background' &&
+      id &&
+      isCheckin &&
+      ws.isCheckout !== true
+    ) {
       console.log(`🚪 ${ws.source} ➜ Ghi log sudden.`);
       handleSudden(id, ws);
       checkinStatus.delete(id);
@@ -323,50 +342,50 @@ wss.on('connection', (ws, req) => {
 
   // ───────── ERROR HANDLER ─────────
   ws.on('error', (err) => {
-    console.error(`❌ WebSocket error (${ws.source}):`, err);
+    console.error(`❌ WebSocket error on ${ws.source}:`, err);
   });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// PING INTERVAL
+// PING INTERVAL - CHẠY ĐỊNH KỲ ĐỂ GIỮ KẾT NỐI
 // ────────────────────────────────────────────────────────────────────────────
 setInterval(() => {
   for (const [account_id, entry] of clients.entries()) {
     const ws = entry.background;
     if (!ws || ws.readyState !== ws.OPEN) continue;
+
     if (!shouldPing(account_id)) continue;
 
     if (expectingPong.get(account_id)) {
-      // Nếu đã chờ pong mà chưa nhận được
-      let counter = inactivityCounters.get(account_id) || 0;
-      counter++;
-      inactivityCounters.set(account_id, counter);
-
-      console.log(`⏰ No PONG from ${account_id}, attempt #${counter}`);
-
-      if (counter >= 3) {
-        console.log(`⏰ 3 lần không phản hồi, xử lý sudden cho ${account_id}`);
+      // Nếu chờ pong quá lâu, tăng counter và check sudden
+      let count = inactivityCounters.get(account_id) || 0;
+      count++;
+      inactivityCounters.set(account_id, count);
+      if (count > 3) {
         handleSudden(account_id, ws);
+        checkinStatus.set(account_id, false);
         inactivityCounters.set(account_id, 0);
         expectingPong.set(account_id, false);
+        continue;
       }
     } else {
-      try {
-        ws.send(JSON.stringify({ type: 'ping' }));
-        expectingPong.set(account_id, true);
-        lastPingSentAt.set(account_id, Date.now());
-        console.log(`✅ Sent PING to ${account_id}`);
-      } catch (err) {
-        console.error(`❌ Error sending ping to ${account_id}:`, err);
-      }
+      // Gửi ping mới
+      ws.send(JSON.stringify({ type: 'ping' }));
+      expectingPong.set(account_id, true);
+      lastPingSentAt.set(account_id, Date.now());
     }
   }
 }, PING_INTERVAL);
 
 // ────────────────────────────────────────────────────────────────────────────
-// START SERVER
+// SERVER START
 // ────────────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3456;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`🚀 Server started on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  createTables(pool).then(() => {
+    console.log('✅ Database tables are ready.');
+  }).catch(err => {
+    console.error('❌ Failed to create tables:', err);
+  });
 });
