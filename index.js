@@ -238,7 +238,7 @@ wss.on('connection', (ws, req) => {
             expectingPong.delete(account_id);
             lastPingSentAt.delete(account_id);
           }
-          ws.send(JSON.stringify({ success: true, type: status }));
+          ws.send(JSON.stringify({ success: true, type: 'log-loginout', status }));
           break;
         }
 
