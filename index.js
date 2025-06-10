@@ -284,7 +284,7 @@ wss.on('connection', (ws, req) => {
     const id         = ws.account_id;
     const isCheckin  = checkinStatus.get(id);
     const hasAnyPing = hasPinged.get(id);
-    console.log(`🚪 ${ws.source} --- ${isCheckin}.`);
+    console.log(`🚪 ${ws.source} --- ${isCheckin} ---- ${id}.`);
     // CHỈ ghi sudden nếu background rớt
     if (ws.source === 'background' && id && isCheckin) {
       console.log(`🚪 ${ws.source} Vào if close.`);
