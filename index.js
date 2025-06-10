@@ -135,6 +135,12 @@ wss.on('connection', (ws) => {
           if (status === 'checkin') {
             checkinStatus.set(account_id, true);
             hasPinged      .set(account_id, false);
+            if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+            expectingPong.set(account_id, true);
+            lastPingSentAt.set(account_id, Date.now());
+            hasPinged.set(account_id, true);
+          }
             ws.isAlive = true;
           }
           ws.send(JSON.stringify({ success: true, type: status }));
