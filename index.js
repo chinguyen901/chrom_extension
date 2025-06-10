@@ -139,7 +139,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'ping' }));
             expectingPong.set(account_id, true);
             lastPingSentAt.set(account_id, Date.now());
-            hasPinged.set(account_id, true);
+            // hasPinged.set(account_id, true);
           }
             ws.isAlive = true;
           }
@@ -218,7 +218,8 @@ wss.on('connection', (ws) => {
 
             if (expectingPong.get(account_id)) {
               if (delayMs >= 500 && delayMs <= PONG_TIMEOUT) {
-                inactivityCounters.set(account_id, 0);  // nhận pong hợp lệ
+                inactivityCounters.set(account_id, 0);
+                hasPinged.set(account_id, true);// nhận pong hợp lệ
               }
               expectingPong.set(account_id, false);
             }
