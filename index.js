@@ -10,11 +10,10 @@
 */
 
 const http                = require('http');
-const { WebSocketServer }  = require('ws');
-const { Pool }             = require('pg');
-const fetch               = require('node-fetch');
+const { WebSocketServer } = require('ws');
+const { Pool }            = require('pg');
 require('dotenv').config();
-const createTables         = require('./createTables');
+const createTables        = require('./createTables');
 
 // ────────────────────────────────────────────────────────────────────────────
 // GLOBAL STATE MAPS
@@ -80,7 +79,7 @@ async function handleSudden(account_id, ws = null) {
   try {
     console.log(` Vào handleSudden .`);
     if (ws?.source === 'popup') return; // popup không ghi sudden
-    
+
     // Nếu socket đã đóng, ta mới ghi log SUDDEN
     if (ws && ws.readyState !== ws.OPEN) {
       await pool.query(
@@ -122,11 +121,12 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
   const urlObj = new URL(req.url, 'ws://placeholder'); // URL tương đối ➜ thêm host giả
   const source = urlObj.searchParams.get('source') || 'background'; // mặc định background
-  ws.source    = source; // lưu lại loại kết nối
+  ws.source = source; // lưu lại loại kết nối
 
   console.log(`✅ New ${source} socket connected.`);
-  ws.isAlive  = true;
+  ws.isAlive = true;
   ws.lastSeen = new Date();
+  ws.account_id = null; // KHỞI TẠO
 
   // ───────── MESSAGE HANDLER ─────────
   ws.on('message', async (data) => {
@@ -139,13 +139,14 @@ wss.on('connection', (ws, req) => {
       } else {
         throw new Error('Received data is not a valid JSON string or Buffer');
       }
+
       const { type, account_id } = msg;
       if (!type) return ws.send(JSON.stringify({ success: false, error: 'Missing message type' }));
 
       // Map socket ↔ account_id
       if (account_id) {
+        ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
         setClient(account_id, ws.source, ws);
-        ws.account_id = account_id;
         inactivityCounters.set(account_id, 0);
       }
 
@@ -229,83 +230,89 @@ wss.on('connection', (ws, req) => {
           if (status === 'checkout') {
             checkinStatus.set(account_id, false);
 
-            // Xóa các trạng thái liên quan khi checkout
+            // Tắt các trạng thái liên quan
             inactivityCounters.delete(account_id);
             hasPinged.delete(account_id);
             expectingPong.delete(account_id);
             lastPingSentAt.delete(account_id);
-
-            // Nếu có kết nối background thì đóng socket này để ngăn ghi sudden (hoặc đánh dấu lý do disconnect)
-            const clientEntry = clients.get(account_id);
-            if (clientEntry?.background) {
-              // Đánh dấu flag để không ghi sudden khi đóng socket
-              clientEntry.background.isCheckout = true;
-              clientEntry.background.close();
-            }
           }
-          ws.send(JSON.stringify({ success: true, type: 'log-loginout', status }));
+          ws.send(JSON.stringify({ success: true, type: status }));
           break;
         }
 
-        // ---------------- SCREENSHOT ----------------
-        case 'log-screenshot': {
-          const { hash, created_at } = msg;
-          await pool.query(
-            `INSERT INTO photo_sessions (account_id, hash, created_at)
-             VALUES ($1, $2, $3)`,
-            [account_id, hash, created_at || new Date()]
-          );
-          ws.send(JSON.stringify({ success: true }));
-          break;
-        }
-
-        // ---------------- DISTRACTION ----------------
-        case 'log-distraction': {
-          const { status, note, created_at } = msg;
-          await pool.query(
-            `INSERT INTO distraction_sessions (account_id, status, note, created_at)
-             VALUES ($1, $2, $3, $4)`,
-            [account_id, status || 'unknown', note || '', created_at || new Date()]
-          );
-          ws.send(JSON.stringify({ success: true }));
-          break;
-        }
-
-        // ---------------- PONG ----------------
+        // ---------------- PING / PONG ----------------
         case 'pong': {
-          if (account_id && shouldPing(account_id)) {
-            const sentAt  = lastPingSentAt.get(account_id) || 0;
-            const delayMs = Date.now() - sentAt;
-
-            if (expectingPong.get(account_id)) {
-              if (delayMs >= 500 && delayMs <= PONG_TIMEOUT) {
-                inactivityCounters.set(account_id, 0);
-                hasPinged.set(account_id, true);
-              }
-              expectingPong.set(account_id, false);
-            }
-            ws.isAlive  = true;
-            ws.lastSeen = new Date();
-          }
+          expectingPong.set(account_id, false);
+          inactivityCounters.set(account_id, 0);
+          hasPinged.set(account_id, true);
+          ws.isAlive = true;
           break;
         }
 
-        // ---------------- DEFAULT ----------------
-        default:
-          ws.send(JSON.stringify({ success: false, error: `Unknown message type: ${type}` }));
+        // ---------------- CHECK ALIVE ----------------
+        case 'check-alive': {
+          ws.isAlive = true;
+          ws.lastSeen = new Date();
+          ws.send(JSON.stringify({ type: 'alive' }));
           break;
+        }
+
+        default:
+          ws.send(JSON.stringify({ success: false, error: 'Unknown message type' }));
       }
     } catch (err) {
-      console.error('❌ Error processing message:', err);
-      ws.send(JSON.stringify({ success: false, error: 'Internal server error' }));
+      console.error('❌ Error parsing message:', err);
+      ws.send(JSON.stringify({ success: false, error: 'Invalid message format' }));
     }
   });
 
-  // ───────── CLOSE HANDLER ─────────
+  // ───────── PING TIMER ─────────
+  const intervalId = setInterval(() => {
+    if (!ws.account_id) return; // Chưa xác định được account_id
+
+    if (!shouldPing(ws.account_id)) {
+      // Nếu chưa checkin, reset trạng thái ping/pong
+      expectingPong.set(ws.account_id, false);
+      return;
+    }
+
+    if (expectingPong.get(ws.account_id)) {
+      // Đã gửi ping, đang chờ pong
+      const lastPing = lastPingSentAt.get(ws.account_id) || 0;
+      if (Date.now() - lastPing > PONG_TIMEOUT) {
+        // Quá hạn pong, socket có thể bị rớt
+        console.warn(`⚠️ Pong timeout for account_id ${ws.account_id}.`);
+
+        const clientSocket = getPreferredSocket(ws.account_id);
+        if (clientSocket) {
+          handleSudden(ws.account_id, clientSocket);
+          checkinStatus.delete(ws.account_id);
+        }
+        expectingPong.set(ws.account_id, false);
+        hasPinged.set(ws.account_id, false);
+      }
+      return;
+    }
+
+    // Gửi ping
+    if (!hasPinged.get(ws.account_id)) {
+      const clientSocket = getPreferredSocket(ws.account_id);
+      if (clientSocket && clientSocket.readyState === clientSocket.OPEN) {
+        clientSocket.send(JSON.stringify({ type: 'ping' }));
+        expectingPong.set(ws.account_id, true);
+        lastPingSentAt.set(ws.account_id, Date.now());
+        console.log(`⏰ Ping sent to account_id ${ws.account_id}`);
+      }
+    }
+  }, PING_INTERVAL);
+
+  // ───────── CLOSE EVENT ─────────
   ws.on('close', () => {
     console.log(`🚪 ${ws.source} socket disconnected.`);
 
     let id = ws.account_id;
+
+    // Nếu chưa có, tìm trong clients map
     if (!id) {
       for (const [acc_id, entry] of clients.entries()) {
         if (entry[ws.source] === ws) {
@@ -315,14 +322,18 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    const isCheckin  = checkinStatus.get(id);
+    if (!id) {
+      console.log('⚠️ Không tìm thấy account_id của socket khi close.');
+      clearInterval(intervalId);
+      return; // Không xử lý tiếp
+    }
+
+    const isCheckin = checkinStatus.get(id);
 
     console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id}`);
 
-    // CHỈ ghi sudden nếu background rớt và không phải do checkout (isCheckout false hoặc undefined)
     if (
       ws.source === 'background' &&
-      id &&
       isCheckin &&
       ws.isCheckout !== true
     ) {
@@ -331,61 +342,29 @@ wss.on('connection', (ws, req) => {
       checkinStatus.delete(id);
     }
 
-    if (id) {
-      removeClient(id, ws.source);
-      inactivityCounters.delete(id);
-      hasPinged.delete(id);
-      expectingPong.delete(id);
-      lastPingSentAt.delete(id);
-    }
+    removeClient(id, ws.source);
+
+    // Xóa trạng thái liên quan
+    inactivityCounters.delete(id);
+    hasPinged.delete(id);
+    expectingPong.delete(id);
+    lastPingSentAt.delete(id);
+
+    clearInterval(intervalId);
   });
 
-  // ───────── ERROR HANDLER ─────────
+  // ───────── ERROR EVENT ─────────
   ws.on('error', (err) => {
-    console.error(`❌ WebSocket error on ${ws.source}:`, err);
+    console.error('❌ WebSocket error:', err);
   });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// PING INTERVAL - CHẠY ĐỊNH KỲ ĐỂ GIỮ KẾT NỐI
+// KHỞI ĐỘNG SERVER
 // ────────────────────────────────────────────────────────────────────────────
-setInterval(() => {
-  for (const [account_id, entry] of clients.entries()) {
-    const ws = entry.background;
-    if (!ws || ws.readyState !== ws.OPEN) continue;
+const PORT = process.env.PORT || 8999;
 
-    if (!shouldPing(account_id)) continue;
-
-    if (expectingPong.get(account_id)) {
-      // Nếu chờ pong quá lâu, tăng counter và check sudden
-      let count = inactivityCounters.get(account_id) || 0;
-      count++;
-      inactivityCounters.set(account_id, count);
-      if (count > 3) {
-        handleSudden(account_id, ws);
-        checkinStatus.set(account_id, false);
-        inactivityCounters.set(account_id, 0);
-        expectingPong.set(account_id, false);
-        continue;
-      }
-    } else {
-      // Gửi ping mới
-      ws.send(JSON.stringify({ type: 'ping' }));
-      expectingPong.set(account_id, true);
-      lastPingSentAt.set(account_id, Date.now());
-    }
-  }
-}, PING_INTERVAL);
-
-// ────────────────────────────────────────────────────────────────────────────
-// SERVER START
-// ────────────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  createTables(pool).then(() => {
-    console.log('✅ Database tables are ready.');
-  }).catch(err => {
-    console.error('❌ Failed to create tables:', err);
-  });
+  console.log(`🚀 Server listening on port ${PORT}`);
+  createTables(pool); // Tạo bảng nếu chưa tồn tại
 });
