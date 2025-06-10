@@ -231,7 +231,7 @@ wss.on('connection', (ws, req) => {
           );
           if (status === 'checkout') {
             checkinStatus.set(account_id, false);
-
+            ws.isCheckout = true;
             // Tắt các trạng thái liên quan
             inactivityCounters.delete(account_id);
             hasPinged.delete(account_id);
