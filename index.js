@@ -266,7 +266,7 @@ setInterval(() => {
     if (expectingPong.get(account_id)) {
       const lastPing = lastPingSentAt.get(account_id) || 0;
       if (Date.now() - lastPing > PONG_TIMEOUT) {
-        if (graceCount >= 1) {
+        if (graceCount >= 2) {
           console.log(`[PING] Timeout confirmed, closing socket for ${account_id}`);
           handleSudden(account_id, ws);
           // Nếu cần vẫn đóng socket để đảm bảo clean-up
