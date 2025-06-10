@@ -78,8 +78,9 @@ pool.connect()
 // ────────────────────────────────────────────────────────────────────────────
 async function handleSudden(account_id, ws = null) {
   try {
+    console.log(` Vào handleSudden .`);
     if (ws?.source === 'popup') return; // popup không ghi sudden
-
+    
     // Nếu socket đã đóng, ta mới ghi log SUDDEN
     if (ws && ws.readyState !== ws.OPEN) {
       await pool.query(
@@ -286,6 +287,7 @@ wss.on('connection', (ws, req) => {
 
     // CHỈ ghi sudden nếu background rớt
     if (ws.source === 'background' && id && isCheckin) {
+      console.log(`🚪 ${ws.source} Vào if close.`);
       handleSudden(id, ws);
     }
 
