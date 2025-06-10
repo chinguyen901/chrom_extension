@@ -131,7 +131,14 @@ wss.on('connection', (ws, req) => {
   // ───────── MESSAGE HANDLER ─────────
   ws.on('message', async (data) => {
     try {
-      const msg = JSON.parse(data);
+      let msg;
+      if (typeof data === 'string') {
+        msg = JSON.parse(data);
+      } else if (Buffer.isBuffer(data)) {
+        msg = JSON.parse(data.toString());
+      } else {
+        throw new Error('Received data is not a valid JSON string or Buffer');
+      }
       const { type, account_id } = msg;
       if (!type) return ws.send(JSON.stringify({ success: false, error: 'Missing message type' }));
 
