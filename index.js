@@ -297,6 +297,41 @@ wss.on('connection', (ws, req) => {
 // ────────────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 8999;
 
+// ────────────────────────────────────────────────────────────────────────────
+// HEARTBEAT CHECK: Phát hiện client mất mạng (background only)
+// ────────────────────────────────────────────────────────────────────────────
+const HEARTBEAT_INTERVAL = 30000; // mỗi 30s gửi 1 ping
+const HEARTBEAT_TIMEOUTS_ALLOWED = 2;
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const [account_id, clientSet] of clients.entries()) {
+    const ws = clientSet.background;
+    if (!ws) continue;
+
+    const lastSeen = ws.lastSeen?.getTime?.() || 0;
+    const isTimedOut = now - lastSeen > HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUTS_ALLOWED;
+
+    if (isTimedOut) {
+      console.warn(`⚠️ Không nhận được phản hồi từ ${account_id} ➜ Ghi log SUDDEN và ngắt kết nối.`);
+      handleSudden(account_id, ws);
+      ws.terminate();
+      removeClient(account_id, 'background');
+      continue;
+    }
+
+    try {
+      ws.ping(); // client sẽ tự động trả pong
+    } catch (err) {
+      console.error(`❌ Lỗi khi gửi ping tới ${account_id}:`, err);
+      ws.terminate();
+      removeClient(account_id, 'background');
+    }
+  }
+}, HEARTBEAT_INTERVAL);
+
+
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
   createTables(pool); // Tạo bảng nếu chưa tồn tại
