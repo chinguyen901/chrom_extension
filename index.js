@@ -1,31 +1,14 @@
 // index.js – WebSocket + PostgreSQL (Railway)
-// -----------------------------------------------------------------------------
-/*
-  ✔️  Hỗ trợ đồng thời hai kết nối WebSocket từ cùng một account_id:
-      – source=background  ➜ giữ kết nối lâu dài, nhận ping/pong, ghi log SUDDEN
-      – source=popup       ➜ kết nối ngắn hạn, KHÔNG ping/pong, KHÔNG ghi SUDDEN
-
-  🔄  Cấu trúc clients: Map<account_id, { background?: ws, popup?: ws }>
-      Giúp server phân biệt và quản lý từng nhánh.
-*/
-
-const http                = require('http');
+const http = require('http');
 const { WebSocketServer } = require('ws');
-const { Pool }            = require('pg');
+const { Pool } = require('pg');
 require('dotenv').config();
-const createTables        = require('./createTables');
+const createTables = require('./createTables');
 
-// ────────────────────────────────────────────────────────────────────────────
-// GLOBAL STATE MAPS
-// ────────────────────────────────────────────────────────────────────────────
-// account_id → { background?: WebSocket, popup?: WebSocket }
-const clients            = new Map();
-const checkinStatus      = new Map();   // account_id → boolean (đang check‑in?)
+// GLOBAL STATE
+const clients = new Map();       // account_id → { background?: ws, popup?: ws }
+const checkinStatus = new Map(); // account_id → boolean (đang check-in?)
 
-
-// ────────────────────────────────────────────────────────────────────────────
-// HELPER: Quản lý clients
-// ────────────────────────────────────────────────────────────────────────────
 function setClient(account_id, source, ws) {
   const entry = clients.get(account_id) || {};
   entry[source] = ws;
@@ -39,57 +22,31 @@ function removeClient(account_id, source) {
   else clients.set(account_id, entry);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// DATABASE POOL
-// ────────────────────────────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl             : { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false }
 });
 
 pool.connect()
   .then(() => console.log('✅ Database connected successfully.'))
-  .catch(err => {
-    console.error('❌ Failed to connect to the database:', err);
-    process.exit(1);
-  });
+  .catch(err => { console.error('❌ DB connection failed:', err); process.exit(1); });
 
-// ────────────────────────────────────────────────────────────────────────────
-// SUDDEN HANDLER (chỉ áp dụng cho background)
-// ────────────────────────────────────────────────────────────────────────────
-async function handleSudden(account_id, ws = null) {
+// SUDDEN HANDLER – chỉ ghi log
+async function handleSudden(account_id) {
   try {
-    console.log(` Vào handleSudden .`);
-    if (ws?.source === 'popup') return; // popup không ghi sudden
-
-    // Nếu socket đã đóng, ta mới ghi log SUDDEN
-    if (ws && ws.readyState !== ws.OPEN) {
-      await pool.query(
-        `INSERT INTO incident_sessions (account_id, status, reason, created_at)
-         VALUES ($1, 'SUDDEN', 'Client Disconnected', $2)`,
-        [account_id, new Date()]
-      );
-      // Reset trạng thái liên quan
-      checkinStatus.set(account_id, false);
-      console.log(`🚀 Da ghi log SUDDEN `);
-      // Báo cho extension (nếu socket còn mở)
-      if (ws && ws.readyState === ws.OPEN) {
-        console.log(`🚀 Gui message checkin again ve client `);
-        ws.send(JSON.stringify({
-          type   : 'force-checkin',
-          status : 'checkin-required',
-          message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
-        }));
-      }
-    }
+    await pool.query(
+      `INSERT INTO incident_sessions (account_id, status, reason, created_at)
+       VALUES ($1, 'SUDDEN', 'Client Disconnected', $2)`,
+      [account_id, new Date()]
+    );
+    checkinStatus.set(account_id, false);
+    console.log(`🚀 Ghi log SUDDEN cho user ${account_id}`);
   } catch (err) {
     console.error('❌ Error in handleSudden:', err);
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// HTTP SERVER + WEBSOCKET SERVER
-// ────────────────────────────────────────────────────────────────────────────
+// HTTP + WebSocket setup
 const server = http.createServer((_, res) => {
   res.writeHead(200);
   res.end('Server is alive');
@@ -98,34 +55,32 @@ const server = http.createServer((_, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-  const urlObj = new URL(req.url, 'ws://placeholder'); // URL tương đối ➜ thêm host giả
-  const source = urlObj.searchParams.get('source') || 'background'; // mặc định background
-  ws.source = source; // lưu lại loại kết nối
-
-  console.log(`✅ New ${source} socket connected.`);
+  const urlObj = new URL(req.url, 'ws://placeholder');
+  const source = urlObj.searchParams.get('source') || 'background';
+  ws.source = source;
   ws.isAlive = true;
   ws.lastSeen = new Date();
-  ws.account_id = null; // KHỞI TẠO
+  ws.account_id = null;
 
-  // ───────── MESSAGE HANDLER ─────────
   ws.on('message', async (data) => {
     try {
-      let msg;
-      if (typeof data === 'string') {
-        msg = JSON.parse(data);
-      } else if (Buffer.isBuffer(data)) {
-        msg = JSON.parse(data.toString());
-      } else {
-        throw new Error('Received data is not a valid JSON string or Buffer');
-      }
-
+      const msg = JSON.parse(data.toString());
       const { type, account_id } = msg;
       if (!type) return ws.send(JSON.stringify({ success: false, error: 'Missing message type' }));
 
-      // Map socket ↔ account_id
       if (account_id) {
-        ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
-        setClient(account_id, ws.source, ws);
+        ws.account_id = account_id;
+        setClient(account_id, source, ws);
+
+        // Nếu background reconnect và user đang cần check-in lại
+        if (source === 'background' && checkinStatus.get(account_id) === false) {
+          console.log(`📢 Gửi force-checkin sau reconnect cho ${account_id}`);
+          ws.send(JSON.stringify({
+            type: 'force-checkin',
+            status: 'checkin-required',
+            message: 'Kết nối vừa được khôi phục – vui lòng CHECK-IN lại để tiếp tục làm việc!'
+          }));
+        }
       }
 
       switch (type) {
@@ -252,95 +207,51 @@ wss.on('connection', (ws, req) => {
 
   // ───────── CLOSE EVENT ─────────
   ws.on('close', () => {
-    console.log(`🚪 ${ws.source} socket disconnected.`);
+    const id = ws.account_id || [...clients.entries()]
+      .find(([k, e]) => e[source] === ws)?.[0];
+    if (!id) return console.log('⚠️ Không tìm thấy account_id khi close.');
 
-    let id = ws.account_id ;
-
-    // Nếu chưa có, tìm trong clients map
-    if (!id) {
-      for (const [acc_id, entry] of clients.entries()) {
-        if (entry[ws.source] === ws) {
-          id = acc_id;
-          break;
-        }
-      }
-    }
-
-    if (!id) {
-      console.log('⚠️ Không tìm thấy account_id của socket khi close.');
-      return; // Không xử lý tiếp
-    }
-    const isCheckin = checkinStatus.get(id);
-
-    console.log(`🚪 ${ws.source} --- Checkin: ${isCheckin} | ID: ${id}`);
-
-    if (
-      ws.source === 'background' &&
-      isCheckin &&
-      ws.isCheckout !== true
-    ) {
-      console.log(`🚪 ${ws.source} ➜ Ghi log sudden.`);
-      handleSudden(id, ws);
+    console.log(`🚪 ${source} socket closed – account ${id}`);
+    if (ws.source === 'background' && checkinStatus.get(id) === true && !ws.isCheckout) {
+      handleSudden(id);
       checkinStatus.delete(id);
     }
-    removeClient(id, ws.source);
+    removeClient(id, source);
   });
 
-  // ───────── ERROR EVENT ─────────
-  ws.on('error', (err) => {
-    console.error('❌ WebSocket error:', err);
-  });
+  ws.on('error', (err) => console.error('❌ WebSocket error:', err));
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// KHỞI ĐỘNG SERVER
-// ────────────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 8999;
-
-// ────────────────────────────────────────────────────────────────────────────
-// HEARTBEAT CHECK: Phát hiện client mất mạng (background only)
-// ────────────────────────────────────────────────────────────────────────────
-const HEARTBEAT_INTERVAL = 30000; // mỗi 30s gửi 1 ping
+// HEARTBEAT CHECK
+const HEARTBEAT_INTERVAL = 30000;
 const HEARTBEAT_TIMEOUTS_ALLOWED = 2;
 
 setInterval(() => {
   const now = Date.now();
-
   for (const [account_id, clientSet] of clients.entries()) {
     const ws = clientSet.background;
     if (!ws) continue;
 
-    const lastSeen = ws.lastSeen?.getTime?.() || 0;
-    const isTimedOut = now - lastSeen > HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUTS_ALLOWED;
-
-    if (isTimedOut) {
-      console.warn(`⚠️ Không nhận được phản hồi từ ${account_id} ➜ Ghi log SUDDEN và ngắt kết nối.`);
-        // Gửi message yêu cầu client check-in lại (nếu socket còn mở)
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'force-checkin',
-          status: 'checkin-required',
-          message: 'Mất kết nối ổn định. Vui lòng Check‑in lại.'
-        }));
-      }
-      handleSudden(account_id, ws);
+    const lastSeen = ws.lastSeen?.getTime() || 0;
+    if (now - lastSeen > HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUTS_ALLOWED) {
+      console.log(`⚠️ Sự cố ping/pong – đánh dấu sudden cho ${account_id}`);
+      handleSudden(account_id);
       ws.terminate();
       removeClient(account_id, 'background');
       continue;
     }
 
     try {
-      ws.ping(); // client sẽ tự động trả pong
+      ws.ping();
     } catch (err) {
-      console.error(`❌ Lỗi khi gửi ping tới ${account_id}:`, err);
+      console.error(`❌ Gửi ping lỗi:`, err);
       ws.terminate();
       removeClient(account_id, 'background');
     }
   }
 }, HEARTBEAT_INTERVAL);
 
-
-server.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-  createTables(pool); // Tạo bảng nếu chưa tồn tại
+server.listen(process.env.PORT || 8999, () => {
+  console.log(`🚀 Server listening on port ${process.env.PORT || 8999}`);
+  createTables(pool);
 });
