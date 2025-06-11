@@ -268,7 +268,6 @@ wss.on('connection', (ws, req) => {
 
     if (!id) {
       console.log('⚠️ Không tìm thấy account_id của socket khi close.');
-      clearInterval(intervalId);
       return; // Không xử lý tiếp
     }
     const isCheckin = checkinStatus.get(id);
@@ -284,9 +283,7 @@ wss.on('connection', (ws, req) => {
       handleSudden(id, ws);
       checkinStatus.delete(id);
     }
-
     removeClient(id, ws.source);
-    clearInterval(intervalId);
   });
 
   // ───────── ERROR EVENT ─────────
