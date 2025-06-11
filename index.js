@@ -315,6 +315,14 @@ setInterval(() => {
 
     if (isTimedOut) {
       console.warn(`⚠️ Không nhận được phản hồi từ ${account_id} ➜ Ghi log SUDDEN và ngắt kết nối.`);
+        // Gửi message yêu cầu client check-in lại (nếu socket còn mở)
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'force-checkin',
+          status: 'checkin-required',
+          message: 'Mất kết nối ổn định. Vui lòng Check‑in lại.'
+        }));
+      }
       handleSudden(account_id, ws);
       ws.terminate();
       removeClient(account_id, 'background');
