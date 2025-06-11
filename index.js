@@ -76,7 +76,7 @@ async function handleSudden(account_id, ws = null) {
       if (ws && ws.readyState === ws.OPEN) {
         console.log(`🚀 Gui message checkin again ve client `);
         ws.send(JSON.stringify({
-          type   : 'sudden',
+          type   : 'force-checkin',
           status : 'checkin-required',
           message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
         }));
@@ -190,7 +190,18 @@ wss.on('connection', (ws, req) => {
           console.log(`🚀 DA ghi log-incident ${status}`);
           break;
         }
-
+        // ---------------- ACTIVE/ NOACTIVE --------------
+        // ---------------- DISTRACTION ----------------
+        case 'log-distraction': {
+          const { status, note, created_at } = msg;
+          await pool.query(
+            `INSERT INTO distraction_sessions (account_id, status, note, created_at)
+             VALUES ($1, $2, $3, $4)`,
+            [account_id, status || 'unknown', note || '', created_at || new Date()]
+          );
+          ws.send(JSON.stringify({ success: true }));
+          break;
+        }
         // ---------------- LOGIN / LOGOUT ----------------
         case 'log-loginout': {
           const { status, created_at } = msg;
@@ -205,6 +216,17 @@ wss.on('connection', (ws, req) => {
           }
           ws.send(JSON.stringify({ success: true, type: 'log-loginout', status }));
           console.log(`🚀 DA ghi log-loginout ${status}`);
+          break;
+        }
+        // ---------------- SCREENSHOT ----------------
+        case 'log-screenshot': {
+          const { hash, created_at } = msg;
+          await pool.query(
+            `INSERT INTO photo_sessions (account_id, hash, created_at)
+             VALUES ($1, $2, $3)`,
+            [account_id, hash, created_at || new Date()]
+          );
+          ws.send(JSON.stringify({ success: true }));
           break;
         }
 
@@ -243,6 +265,7 @@ wss.on('connection', (ws, req) => {
 
     if (!id) {
       console.log('⚠️ Không tìm thấy account_id của socket khi close.');
+      clearInterval(intervalId);
       return; // Không xử lý tiếp
     }
     const isCheckin = checkinStatus.get(id);
@@ -260,6 +283,7 @@ wss.on('connection', (ws, req) => {
     }
 
     removeClient(id, ws.source);
+    clearInterval(intervalId);
   });
 
   // ───────── ERROR EVENT ─────────
