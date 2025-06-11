@@ -200,6 +200,7 @@ wss.on('connection', (ws, req) => {
             [account_id, status || 'unknown', note || '', created_at || new Date()]
           );
           ws.send(JSON.stringify({ success: true }));
+          console.log(`🚀 Da gui log active/noactive `);
           break;
         }
         // ---------------- LOGIN / LOGOUT ----------------
@@ -227,6 +228,7 @@ wss.on('connection', (ws, req) => {
             [account_id, hash, created_at || new Date()]
           );
           ws.send(JSON.stringify({ success: true }));
+          console.log(`🚀 Da luu log screen `);
           break;
         }
 
@@ -235,6 +237,7 @@ wss.on('connection', (ws, req) => {
           ws.isAlive = true;
           ws.lastSeen = new Date();
           ws.send(JSON.stringify({ type: 'alive' }));
+          console.log(`🚀 alive `);
           break;
         }
 
