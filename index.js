@@ -21,7 +21,7 @@ const createTables        = require('./createTables');
 // account_id → { background?: WebSocket, popup?: WebSocket }
 const clients            = new Map();
 const checkinStatus      = new Map();
-const checkinAgain      = False;   // account_id → boolean (đang check‑in?)
+const needsCheckin = new Map();   // account_id → boolean (đang check‑in?)
 
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ async function handleSudden(account_id, ws = null) {
       );
       // Reset trạng thái liên quan
       checkinStatus.set(account_id, false);
-      checkinAgain = True;
+      needsCheckin.set(account_id, true);
       console.log(`🚀 Da ghi log SUDDEN `);
     }
   } catch (err) {
