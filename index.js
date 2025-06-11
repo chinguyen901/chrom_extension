@@ -21,7 +21,7 @@ const createTables        = require('./createTables');
 // account_id → { background?: WebSocket, popup?: WebSocket }
 const clients            = new Map();
 const checkinStatus      = new Map();   // account_id → boolean (đang check‑in?)
-
+const needsCheckin       = new Map();   // account_id → boolean (cần check‑in?)
 
 // ────────────────────────────────────────────────────────────────────────────
 // HELPER: Quản lý clients
@@ -71,6 +71,7 @@ async function handleSudden(account_id, ws = null) {
       );
       // Reset trạng thái liên quan
       checkinStatus.set(account_id, false);
+      needsCheckin.set(account_id, true);
       console.log(`🚀 Da ghi log SUDDEN `);
       // Báo cho extension (nếu socket còn mở)
       if (ws && ws.readyState === ws.OPEN) {
@@ -126,6 +127,13 @@ wss.on('connection', (ws, req) => {
       if (account_id) {
         ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
         setClient(account_id, ws.source, ws);
+      }
+        // Sau khi mapClient
+      if ((type === 'authenticate' || type === 'log-distraction' || type === 'log-screenshot')
+          && needsCheckin.get(account_id)) {
+        console.log(`🚀 ${ws.source} ➜ Gửi force-checkin do mất kết nối.`);
+        ws.send(JSON.stringify({ type: 'force-checkin', message: 'Bạn vừa mất kết nối, vui lòng Check‑in lại.' }));
+        needsCheckin.delete(account_id);
       }
 
       switch (type) {
