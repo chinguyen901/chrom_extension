@@ -99,14 +99,6 @@ wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.lastSeen = new Date();
   ws.account_id = null; // KHỞI TẠO
-  if (checkinAgain) {
-    console.log(`🚀 Gui message checkin again ve client `);
-    ws.send(JSON.stringify({
-      type   : 'force-checkin',
-      status : 'checkin-required',
-      message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
-    }));
-  }
 
   // ───────── MESSAGE HANDLER ─────────
   ws.on('message', async (data) => {
