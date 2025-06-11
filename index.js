@@ -111,6 +111,7 @@ wss.on('connection', (ws, req) => {
   // ───────── MESSAGE HANDLER ─────────
   ws.on('message', async (data) => {
     try {
+      console.log(`Start recived message ---------------.`);
       let msg;
       if (typeof data === 'string') {
         msg = JSON.parse(data);
