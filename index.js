@@ -74,15 +74,6 @@ async function handleSudden(account_id, ws = null) {
       checkinStatus.set(account_id, false);
       checkinAgain = True;
       console.log(`🚀 Da ghi log SUDDEN `);
-      // Báo cho extension (nếu socket còn mở)
-      // if (ws && ws.readyState === ws.OPEN) {
-      //   console.log(`🚀 Gui message checkin again ve client `);
-      //   ws.send(JSON.stringify({
-      //     type   : 'force-checkin',
-      //     status : 'checkin-required',
-      //     message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
-      //   }));
-      // }
     }
   } catch (err) {
     console.error('❌ Error in handleSudden:', err);
@@ -133,9 +124,20 @@ wss.on('connection', (ws, req) => {
       if (!type) return ws.send(JSON.stringify({ success: false, error: 'Missing message type' }));
 
       // Map socket ↔ account_id
+      console.log(`📢 Check account id`, account_id);
       if (account_id) {
         ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
         setClient(account_id, ws.source, ws);
+        console.log(`📢 source ${source} ---- needsCheckin : ${needsCheckin.get(account_id)}`);
+        if (source === 'background' && needsCheckin.get(account_id)) {
+          ws.send(JSON.stringify({
+            type: 'force-checkin',
+            status: 'checkin-required',
+            message: 'Bạn vừa mất kết nối. Vui lòng Check‑in lại.'
+          }));
+          needsCheckin.delete(account_id);
+          console.log(`📢 Đã gửi force-checkin sau reconnect cho account`, account_id);
+        }
       }
 
       switch (type) {
