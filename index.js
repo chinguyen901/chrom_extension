@@ -20,8 +20,7 @@ const createTables        = require('./createTables');
 // ────────────────────────────────────────────────────────────────────────────
 // account_id → { background?: WebSocket, popup?: WebSocket }
 const clients            = new Map();
-const checkinStatus      = new Map();
-const needsCheckin = new Map();   // account_id → boolean (đang check‑in?)
+const checkinStatus      = new Map();   // account_id → boolean (đang check‑in?)
 
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -72,8 +71,16 @@ async function handleSudden(account_id, ws = null) {
       );
       // Reset trạng thái liên quan
       checkinStatus.set(account_id, false);
-      needsCheckin.set(account_id, true);
       console.log(`🚀 Da ghi log SUDDEN `);
+      // Báo cho extension (nếu socket còn mở)
+      if (ws && ws.readyState === ws.OPEN) {
+        console.log(`🚀 Gui message checkin again ve client `);
+        ws.send(JSON.stringify({
+          type   : 'force-checkin',
+          status : 'checkin-required',
+          message: 'Kết nối mất ổn định – vui lòng CHECK-IN lại để tiếp tục làm việc!'
+        }));
+      }
     }
   } catch (err) {
     console.error('❌ Error in handleSudden:', err);
@@ -116,20 +123,9 @@ wss.on('connection', (ws, req) => {
       if (!type) return ws.send(JSON.stringify({ success: false, error: 'Missing message type' }));
 
       // Map socket ↔ account_id
-      console.log(`📢 Check account id`, account_id);
       if (account_id) {
         ws.account_id = account_id;          // LUÔN cập nhật ws.account_id
         setClient(account_id, ws.source, ws);
-        console.log(`📢 source ${source} ---- needsCheckin : ${needsCheckin.get(account_id)}`);
-        if (source === 'background' && needsCheckin.get(account_id)) {
-          ws.send(JSON.stringify({
-            type: 'force-checkin',
-            status: 'checkin-required',
-            message: 'Bạn vừa mất kết nối. Vui lòng Check‑in lại.'
-          }));
-          needsCheckin.delete(account_id);
-          console.log(`📢 Đã gửi force-checkin sau reconnect cho account`, account_id);
-        }
       }
 
       switch (type) {
@@ -300,42 +296,6 @@ wss.on('connection', (ws, req) => {
 // KHỞI ĐỘNG SERVER
 // ────────────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 8999;
-
-// ────────────────────────────────────────────────────────────────────────────
-// HEARTBEAT CHECK: Phát hiện client mất mạng (background only)
-// ────────────────────────────────────────────────────────────────────────────
-const HEARTBEAT_INTERVAL = 30000; // mỗi 30s gửi 1 ping
-const HEARTBEAT_TIMEOUTS_ALLOWED = 2;
-
-setInterval(() => {
-  const now = Date.now();
-
-  for (const [account_id, clientSet] of clients.entries()) {
-    const ws = clientSet.background;
-    if (!ws) continue;
-
-    const lastSeen = ws.lastSeen?.getTime?.() || 0;
-    const isTimedOut = now - lastSeen > HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUTS_ALLOWED;
-
-    if (isTimedOut) {
-      console.warn(`⚠️ Không nhận được phản hồi từ ${account_id} ➜ Ghi log SUDDEN và ngắt kết nối.`);
-        // Gửi message yêu cầu client check-in lại (nếu socket còn mở)
-      handleSudden(account_id, ws);
-      ws.terminate();
-      removeClient(account_id, 'background');
-      continue;
-    }
-
-    try {
-      ws.ping(); // client sẽ tự động trả pong
-    } catch (err) {
-      console.error(`❌ Lỗi khi gửi ping tới ${account_id}:`, err);
-      ws.terminate();
-      removeClient(account_id, 'background');
-    }
-  }
-}, HEARTBEAT_INTERVAL);
-
 
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
