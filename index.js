@@ -243,14 +243,14 @@ wss.on('connection', (ws, req) => {
         }
 
         // ---------------- PING / PONG ----------------
-        case 'pong': {
-          console.log(`⏰ pong  account_id ${account_id}`);
-          expectingPong.set(account_id, false);
-          inactivityCounters.set(account_id, 0);
-          hasPinged.set(account_id, true);
-          ws.isAlive = true;
-          break;
-        }
+        // case 'pong': {
+        //   console.log(`⏰ pong  account_id ${account_id}`);
+        //   expectingPong.set(account_id, false);
+        //   inactivityCounters.set(account_id, 0);
+        //   hasPinged.set(account_id, true);
+        //   ws.isAlive = true;
+        //   break;
+        // }
 
         // ---------------- CHECK ALIVE ----------------
         case 'check-alive': {
@@ -270,45 +270,45 @@ wss.on('connection', (ws, req) => {
   });
 
   // ───────── PING TIMER ─────────
-  const intervalId = setInterval(() => {
-    console.log(`⏰ Tien hanh gửi ping`);
-    if (!ws.account_id) return; // Chưa xác định được account_id
+  // const intervalId = setInterval(() => {
+  //   console.log(`⏰ Tien hanh gửi ping`);
+  //   if (!ws.account_id) return; // Chưa xác định được account_id
 
-    if (!shouldPing(ws.account_id)) {
-      // Nếu chưa checkin, reset trạng thái ping/pong
-      expectingPong.set(ws.account_id, false);
-      return;
-    }
+  //   if (!shouldPing(ws.account_id)) {
+  //     // Nếu chưa checkin, reset trạng thái ping/pong
+  //     expectingPong.set(ws.account_id, false);
+  //     return;
+  //   }
 
-    if (expectingPong.get(ws.account_id)) {
-      // Đã gửi ping, đang chờ pong
-      const lastPing = lastPingSentAt.get(ws.account_id) || 0;
-      if (Date.now() - lastPing > PONG_TIMEOUT) {
-        // Quá hạn pong, socket có thể bị rớt
-        console.warn(`⚠️ Pong timeout for account_id ${ws.account_id}.`);
+  //   if (expectingPong.get(ws.account_id)) {
+  //     // Đã gửi ping, đang chờ pong
+  //     const lastPing = lastPingSentAt.get(ws.account_id) || 0;
+  //     if (Date.now() - lastPing > PONG_TIMEOUT) {
+  //       // Quá hạn pong, socket có thể bị rớt
+  //       console.warn(`⚠️ Pong timeout for account_id ${ws.account_id}.`);
 
-        const clientSocket = getPreferredSocket(ws.account_id);
-        if (clientSocket) {
-          handleSudden(ws.account_id, clientSocket);
-          checkinStatus.delete(ws.account_id);
-        }
-        expectingPong.set(ws.account_id, false);
-        hasPinged.set(ws.account_id, false);
-      }
-      return;
-    }
+  //       const clientSocket = getPreferredSocket(ws.account_id);
+  //       if (clientSocket) {
+  //         handleSudden(ws.account_id, clientSocket);
+  //         checkinStatus.delete(ws.account_id);
+  //       }
+  //       expectingPong.set(ws.account_id, false);
+  //       hasPinged.set(ws.account_id, false);
+  //     }
+  //     return;
+  //   }
 
-    // Gửi ping
-    if (!hasPinged.get(ws.account_id)) {
-      const clientSocket = getPreferredSocket(ws.account_id);
-      if (clientSocket && clientSocket.readyState === clientSocket.OPEN) {
-        clientSocket.send(JSON.stringify({ type: 'ping' }));
-        expectingPong.set(ws.account_id, true);
-        lastPingSentAt.set(ws.account_id, Date.now());
-        console.log(`⏰ Ping sent to account_id ${ws.account_id}`);
-      }
-    }
-  }, PING_INTERVAL);
+  //   // Gửi ping
+  //   if (!hasPinged.get(ws.account_id)) {
+  //     const clientSocket = getPreferredSocket(ws.account_id);
+  //     if (clientSocket && clientSocket.readyState === clientSocket.OPEN) {
+  //       clientSocket.send(JSON.stringify({ type: 'ping' }));
+  //       expectingPong.set(ws.account_id, true);
+  //       lastPingSentAt.set(ws.account_id, Date.now());
+  //       console.log(`⏰ Ping sent to account_id ${ws.account_id}`);
+  //     }
+  //   }
+  // }, PING_INTERVAL);
 
   // ───────── CLOSE EVENT ─────────
   ws.on('close', () => {
