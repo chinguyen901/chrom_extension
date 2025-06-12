@@ -180,8 +180,10 @@ wss.on('connection', (ws, req) => {
              VALUES ($1, $2, $3)`,
             [account_id, status || 'unknown', created_at || new Date()]
           );
-          if (status === 'break-done') checkinStatus.set(account_id, true);
-          else                          checkinStatus.set(account_id, false);
+          if (status === 'break_end') 
+            checkinStatus.set(account_id, true);
+          else                          
+            checkinStatus.set(account_id, false);
           ws.send(JSON.stringify({ success: true, type: status }));
           console.log(`🚀 DA ghi log-break ${status}`);
           break;
